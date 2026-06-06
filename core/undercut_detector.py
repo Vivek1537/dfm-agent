@@ -7,7 +7,8 @@ and cannot be pulled out by either the Cavity or the Core mold half.
 We determine this by:
 1. Identifying which mold half the face belongs to (based on its normal).
 2. Casting a ray from the face's center in its pull direction.
-3. If the ray hits another part of the solid, the face is an undercut.
+3. If the ray hits another part of the solid beyond the wall thickness,
+   the face is a true undercut.
 """
 
 from typing import List, Tuple
@@ -19,6 +20,11 @@ from OCP.TopoDS import TopoDS_Compound
 from OCP.BRep import BRep_Builder
 from OCP.IntCurvesFace import IntCurvesFace_ShapeIntersector
 from OCP.gp import gp_Lin, gp_Dir, gp_Pnt
+
+# Minimum ray hit distance (mm). Hits closer than this are treated as
+# wall-thickness artifacts (e.g., inner face → shell wall → outer face)
+# and NOT counted as true undercuts.
+MIN_HIT_DISTANCE = 2.0
 
 
 def _dot(a: Tuple[float, float, float],
@@ -35,7 +41,7 @@ def detect_undercuts(
 
     Cavity pulls in `mold_direction`. Core pulls in `-mold_direction`.
     If a face points towards Cavity, we cast a ray in `mold_direction`.
-    If it hits the solid, it's trapped (undercut).
+    If it hits the solid beyond MIN_HIT_DISTANCE, it's trapped (undercut).
     """
     if not faces:
         return faces
@@ -66,11 +72,17 @@ def detect_undercuts(
         ray_vec = gp_Dir(pull_dir[0], pull_dir[1], pull_dir[2])
         line = gp_Lin(ray_origin, ray_vec)
 
-        # Offset start by 1e-4 to avoid hitting the face itself
+        # Start ray just past the surface to avoid self-intersection
         intersector.Perform(line, 1e-4, 1000.0)
 
-        # If it hits anything, it's trapped
-        face.is_undercut = (intersector.NbPnt() > 0)
+        # Check if any hit is beyond the wall-thickness threshold
+        is_trapped = False
+        for i in range(1, intersector.NbPnt() + 1):
+            if intersector.WParameter(i) >= MIN_HIT_DISTANCE:
+                is_trapped = True
+                break
+
+        face.is_undercut = is_trapped
 
     return faces
 
