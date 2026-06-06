@@ -1,0 +1,25 @@
+# ─────────────────────────────────────────────
+# dfm-agent — requirements.txt
+# Python 3.10+ recommended
+# ─────────────────────────────────────────────
+
+# ── STEP parsing + 3D geometry (Person A) ────
+# pythonocc-core is NOT on pip.
+# cadquery bundles OCP (OpenCASCADE Python bindings).
+# Import as: from OCP.STEPControl import STEPControl_Reader
+cadquery==2.7.0
+
+# ── Vector math (Person A) ───────────────────
+numpy>=2.0.0
+
+# ── 3D Visualization (Person B) ──────────────
+pyvista>=0.48.0
+
+# ── GUI (Person B) ───────────────────────────
+streamlit>=1.58.0
+
+# ── PDF Report (Person B) ────────────────────
+reportlab>=4.4.0
+
+# ── Testing (both) ───────────────────────────
+pytest>=9.0.0
