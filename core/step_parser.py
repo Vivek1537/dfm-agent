@@ -14,7 +14,7 @@ Surface normal extraction per type:
 """
 
 import math
-from typing import List, Tuple
+from typing import List, Tuple, Any
 
 from OCP.STEPControl import STEPControl_Reader
 from OCP.TopExp import TopExp_Explorer
@@ -118,7 +118,7 @@ def _get_surface_type_label(adaptor: BRepAdaptor_Surface) -> str:
     return _SURFACE_TYPE_MAP.get(stype, "OTHER")
 
 
-def parse_step(filepath: str) -> List[FaceData]:
+def parse_step(filepath: str) -> Tuple[List[FaceData], Any]:
     """
     Parse a STEP file and return a list of FaceData for every face.
 
@@ -126,9 +126,9 @@ def parse_step(filepath: str) -> List[FaceData]:
         filepath: Path to .stp or .step file.
 
     Returns:
-        List of FaceData with face_shape, normal, area, and surface_type populated.
-        Classification, draft_angle, and is_undercut are left at defaults
-        (filled by later analysis steps).
+        Tuple containing:
+        - List of FaceData with face_shape, normal, area, and surface_type populated.
+        - The raw TopoDS_Shape representing the entire solid.
 
     Raises:
         RuntimeError: If the STEP file cannot be read.
@@ -176,7 +176,7 @@ def parse_step(filepath: str) -> List[FaceData]:
         face_id += 1
         explorer.Next()
 
-    return faces
+    return faces, shape
 
 
 if __name__ == "__main__":
@@ -187,7 +187,7 @@ if __name__ == "__main__":
     stp_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join("assets", "Part1.stp")
 
     print(f"Parsing: {stp_path}")
-    faces = parse_step(stp_path)
+    faces, shape = parse_step(stp_path)
     print(f"Total faces extracted: {len(faces)}")
 
     # Surface type breakdown

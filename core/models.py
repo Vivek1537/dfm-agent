@@ -51,6 +51,7 @@ class AnalysisResult:
     best_mold_direction: Tuple[float, float, float]
     direction_candidates: List[DirectionCandidate]
     faces: List[FaceData]
+    raw_shape: Any = None
 
     # ── Filled by Person B (parting line detection) ──
     parting_line_edges: List[Any] = field(default_factory=list)
