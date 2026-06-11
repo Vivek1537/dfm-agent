@@ -10,10 +10,15 @@ from OCP.TopoDS import TopoDS
 
 from core.models import FaceData
 
-def find_parting_line(shape: Any, faces: List[FaceData]) -> List[Any]:
+from typing import Tuple
+
+def _dot(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+def find_parting_line(shape: Any, faces: List[FaceData], mold_direction: Tuple[float, float, float]) -> List[Any]:
     """
     Finds the main parting line by identifying edges that are shared by 
-    exactly one 'core' face and exactly one 'cavity' face.
+    one face facing the core direction and one facing the cavity direction.
     """
     parting_line_edges = []
     
@@ -44,8 +49,11 @@ def find_parting_line(shape: Any, faces: List[FaceData]) -> List[Any]:
                     break
                     
             if face1_data and face2_data:
-                classes = {face1_data.classification, face2_data.classification}
-                if "core" in classes and "cavity" in classes:
+                dot1 = _dot(face1_data.normal, mold_direction)
+                dot2 = _dot(face2_data.normal, mold_direction)
+                
+                # If one is >= 0 (cavity-facing) and one is < 0 (core-facing)
+                if (dot1 >= 0 and dot2 < 0) or (dot1 < 0 and dot2 >= 0):
                     parting_line_edges.append(edge)
                     
     return parting_line_edges

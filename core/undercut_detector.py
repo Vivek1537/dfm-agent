@@ -61,28 +61,35 @@ def detect_undercuts(
     for face in faces:
         dot_val = _dot(face.normal, mold_direction)
 
+        def is_trapped_in_dir(p_dir: Tuple[float, float, float]) -> bool:
+            epsilon = 0.1
+            ox = face.center[0] + face.normal[0] * epsilon
+            oy = face.center[1] + face.normal[1] * epsilon
+            oz = face.center[2] + face.normal[2] * epsilon
+            ray_origin = gp_Pnt(ox, oy, oz)
+            ray_vec = gp_Dir(p_dir[0], p_dir[1], p_dir[2])
+            line = gp_Lin(ray_origin, ray_vec)
+            try:
+                intersector.Perform(line, 1e-4, 1000.0)
+                for i in range(1, intersector.NbPnt() + 1):
+                    if intersector.WParameter(i) >= MIN_HIT_DISTANCE:
+                        return True
+            except Exception:
+                pass
+            return False
+
         # Determine which mold half this face is trying to pull with
-        if dot_val >= 0:
-            pull_dir = mold_direction
+        if dot_val > 0.01:
+            face.is_undercut = is_trapped_in_dir(mold_direction)
+        elif dot_val < -0.01:
+            neg_dir = (-mold_direction[0], -mold_direction[1], -mold_direction[2])
+            face.is_undercut = is_trapped_in_dir(neg_dir)
         else:
-            pull_dir = (-mold_direction[0], -mold_direction[1], -mold_direction[2])
-
-        # Cast ray
-        ray_origin = gp_Pnt(face.center[0], face.center[1], face.center[2])
-        ray_vec = gp_Dir(pull_dir[0], pull_dir[1], pull_dir[2])
-        line = gp_Lin(ray_origin, ray_vec)
-
-        # Start ray just past the surface to avoid self-intersection
-        intersector.Perform(line, 1e-4, 1000.0)
-
-        # Check if any hit is beyond the wall-thickness threshold
-        is_trapped = False
-        for i in range(1, intersector.NbPnt() + 1):
-            if intersector.WParameter(i) >= MIN_HIT_DISTANCE:
-                is_trapped = True
-                break
-
-        face.is_undercut = is_trapped
+            # Near-perpendicular wall (within ~0.6° of parting plane).
+            # Use a CONSISTENT direction (always mold_direction) so that
+            # mirror-symmetric faces get identical treatment — no floating
+            # point sign-bit asymmetry.
+            face.is_undercut = is_trapped_in_dir(mold_direction)
 
     return faces
 

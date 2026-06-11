@@ -40,7 +40,7 @@ def analyze_part(filepath: str, part_name: str, override_direction: Optional[Tup
     classify_faces(faces, direction_to_use)
     
     # 5. Extract Parting Line
-    pl_edges = find_parting_line(shape, faces)
+    pl_edges = find_parting_line(shape, faces, direction_to_use)
 
     # 6. Build Final Result
     res = build_analysis_result(part_name, faces, best_candidate, all_candidates)
