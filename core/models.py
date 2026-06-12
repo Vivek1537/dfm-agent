@@ -70,21 +70,28 @@ def compute_score(faces: List[FaceData]) -> float:
     """
     Compute a manufacturability score from 0–100.
 
-    Penalty formula:
-      - Undercut faces penalize up to 60 points (area-weighted)
-      - Warning faces (draft < 1°) penalize up to 20 points (area-weighted)
+    Penalty formula (area + count weighted):
+      - Undercut area:  up to 30 points penalty
+      - Undercut count: up to 20 points penalty
+      - Warning area:   up to 15 points penalty
+      - Warning count:  up to 5 points penalty
     """
     total_area = sum(f.area for f in faces)
-    if total_area == 0:
+    if total_area == 0 or len(faces) == 0:
         return 0.0
 
-    bad_area = sum(f.area for f in faces if f.is_undercut)
-    warn_area = sum(
-        f.area for f in faces
-        if f.draft_angle < 1.0 and not f.is_undercut
-    )
+    bad_faces = [f for f in faces if f.is_undercut]
+    warn_faces = [f for f in faces if f.draft_angle < 1.0 and not f.is_undercut]
 
-    score = 100.0 - (bad_area / total_area * 60) - (warn_area / total_area * 20)
+    bad_area = sum(f.area for f in bad_faces)
+    warn_area = sum(f.area for f in warn_faces)
+
+    bad_area_penalty = (bad_area / total_area) * 30
+    bad_count_penalty = (len(bad_faces) / len(faces)) * 20
+    warn_area_penalty = (warn_area / total_area) * 15
+    warn_count_penalty = (len(warn_faces) / len(faces)) * 5
+
+    score = 100.0 - bad_area_penalty - bad_count_penalty - warn_area_penalty - warn_count_penalty
     return max(0.0, min(100.0, score))
 
 

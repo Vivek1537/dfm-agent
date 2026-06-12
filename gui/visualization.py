@@ -7,11 +7,11 @@ from core.models import FaceData
 
 # Colors for different classifications
 COLORS = {
-    "core": "blue",
-    "cavity": "green",
+    "core": "lightgrey",
+    "cavity": "lightgrey",
     "undercut": "red",
-    "warning": "yellow",
-    "": "white"  # unclassified / fallback
+    "warning": "lightgrey",
+    "": "lightgrey"  # unclassified / fallback
 }
 
 def create_interactive_3d(faces: List[FaceData], parting_line_edges: List[Any]) -> go.Figure:
@@ -111,7 +111,7 @@ def create_3d_snapshot(faces: List[FaceData], parting_line_edges: List[Any], out
             
             mesh = pv.PolyData(pts, faces_arr.flatten())
             color = COLORS.get(face_data.classification, "white")
-            plotter.add_mesh(mesh, color=color, show_edges=True, edge_color="black", line_width=1)
+            plotter.add_mesh(mesh, color=color, show_edges=True, edge_color="black", line_width=1, specular=0.1, diffuse=0.9)
         except Exception:
             pass
             
@@ -132,5 +132,6 @@ def create_3d_snapshot(faces: List[FaceData], parting_line_edges: List[Any], out
             
     plotter.set_background("white")  # White background for PDF
     plotter.view_isometric()
+    plotter.reset_camera()
     plotter.screenshot(output_path)
     return output_path

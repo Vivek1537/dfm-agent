@@ -18,6 +18,12 @@ pyvista>=0.48.0
 # ── GUI (Person B) ───────────────────────────
 streamlit>=1.58.0
 nest_asyncio2>=1.7.0
+plotly>=5.18.0
+
+# ── API Backend ──────────────────────────────
+fastapi
+uvicorn
+python-multipart
 
 # ── PDF Report (Person B) ────────────────────
 reportlab>=4.4.0
