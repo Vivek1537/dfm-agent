@@ -9,10 +9,23 @@ import math
 import pytest
 
 from core.models import FaceData, DirectionCandidate, AnalysisResult, compute_score
-from core.mold_direction import evaluate_direction, find_best_mold_direction, _dot
+from core.mold_direction import find_best_mold_direction
 from core.undercut_detector import detect_undercuts, get_undercut_summary
 from core.draft_angle import compute_draft_angles, classify_draft, get_draft_summary
 from core.face_classifier import classify_faces, build_analysis_result, get_classification_summary
+
+def _dot(a, b):
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+def evaluate_direction(faces, direction, label):
+    detect_undercuts(faces, direction)
+    return DirectionCandidate(
+        direction=direction,
+        label=label,
+        undercut_count=sum(1 for f in faces if f.is_undercut),
+        undercut_area=sum(f.area for f in faces if f.is_undercut),
+    )
+
 
 
 # ── Helper: create a FaceData with minimal required fields ───────────
@@ -66,7 +79,7 @@ class TestModels:
     def test_compute_score_all_undercut(self):
         faces = [_face(0, (0, 0, -1), area=100.0)]
         faces[0].is_undercut = True
-        assert compute_score(faces) == 40.0  # 100 - 60
+        assert compute_score(faces) == 50.0  # 100 - 30 - 20
 
     def test_compute_score_mixed(self):
         good = _face(0, (0, 0, 1), area=80.0)
@@ -77,8 +90,13 @@ class TestModels:
         bad.is_undercut = True
         bad.draft_angle = -5.0
         score = compute_score([good, warn, bad])
-        # 100 - (10/100 * 60) - (10/100 * 20) = 100 - 6 - 2 = 92
-        assert abs(score - 92.0) < 0.01
+        # With new formulas:
+        # bad_area_penalty = 10/100 * 30 = 3
+        # bad_count_penalty = 1/3 * 20 = 6.67
+        # warn_area_penalty = 10/100 * 15 = 1.5
+        # warn_count_penalty = 1/3 * 5 = 1.67
+        # Total penalty = 3 + 6.67 + 1.5 + 1.67 = 12.83 => Score = 87.17
+        assert abs(score - 87.17) < 0.01
 
     def test_compute_score_empty(self):
         assert compute_score([]) == 0.0
@@ -186,11 +204,12 @@ class TestDraftAngle:
         compute_draft_angles(faces, (0, 0, 1))
         assert abs(faces[0].draft_angle - 0.0) < 0.01
 
-    def test_face_opposing_direction_has_negative_draft(self):
-        # Normal = (0,0,-1), direction = (0,0,1) → angle = 180° → draft = -90°
+    def test_face_opposing_direction_has_positive_draft(self):
+        # Under the new logic, draft angle is always positive (relative to the pulling mold half).
+        # Normal = (0,0,-1), direction = (0,0,1) → pulls in core (-Z) → angle = 0° → draft = 90°
         faces = [_face(0, (0, 0, -1))]
         compute_draft_angles(faces, (0, 0, 1))
-        assert abs(faces[0].draft_angle - (-90.0)) < 0.01
+        assert abs(faces[0].draft_angle - 90.0) < 0.01
 
     def test_45_degree_tilt(self):
         inv_sqrt2 = 1 / math.sqrt(2)
@@ -212,13 +231,13 @@ class TestDraftAngle:
         faces = [
             _face(0, (0, 0, 1)),   # will have 90° draft
             _face(1, (1, 0, 0)),   # will have 0° draft
-            _face(2, (0, 0, -1)),  # will have -90° draft
+            _face(2, (0, 0, -1)),  # will have 90° draft
         ]
         compute_draft_angles(faces, (0, 0, 1))
         summary = get_draft_summary(faces)
-        assert summary["good_count"] == 1
+        assert summary["good_count"] == 2
         assert summary["warning_count"] == 1
-        assert summary["undercut_count"] == 1
+        assert summary["undercut_count"] == 0
 
 
 # ═══════════════════════════════════════════════════════════════════════

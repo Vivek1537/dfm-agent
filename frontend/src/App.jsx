@@ -152,10 +152,10 @@ function App() {
               <div className="metric-card" style={{ gridColumn: 'span 2' }}>
                 <div className="metric-label">Parting Lines</div>
                 <div className="metric-value" style={{ color: '#00ffff', fontSize: '1.25rem' }}>
-                  {data.geometry?.parting_line_loops || 0} loops <span style={{fontSize: '0.875rem', color: '#94a3b8'}}>({data.geometry?.parting_lines?.length || 0} edges)</span>
+                  {data.geometry?.parting_line_loops || 0} loops <span style={{fontSize: '0.875rem', color: '#94a3b8'}}>({data.geometry?.parting_lines?.[0]?.segments?.length || 0} edges)</span>
                 </div>
                 <div className="metric-subtext">
-                  Boundary edges splitting core & cavity
+                  {data.geometry?.parting_line_is_ambiguous ? '⚠️ Multiple candidates (ambiguous)' : 'Continuous partition loop'}
                 </div>
               </div>
             </div>
