@@ -86,10 +86,14 @@ def detect_undercuts(
             face.is_undercut = is_trapped_in_dir(neg_dir)
         else:
             # Near-perpendicular wall (within ~0.6° of parting plane).
-            # Use a CONSISTENT direction (always mold_direction) so that
-            # mirror-symmetric faces get identical treatment — no floating
-            # point sign-bit asymmetry.
-            face.is_undercut = is_trapped_in_dir(mold_direction)
+            # A vertical wall is only a true undercut if it is trapped
+            # from BOTH mold halves. If it's open from either the cavity
+            # or core side, that half can form the face — not an undercut.
+            neg_dir = (-mold_direction[0], -mold_direction[1], -mold_direction[2])
+            face.is_undercut = (
+                is_trapped_in_dir(mold_direction)
+                and is_trapped_in_dir(neg_dir)
+            )
 
     return faces
 

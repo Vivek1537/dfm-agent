@@ -1,7 +1,67 @@
-import React, { useMemo } from 'react';
-import { Canvas } from '@react-three/fiber';
+import React, { useMemo, useRef, useCallback } from 'react';
+import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Environment, ContactShadows, Edges, Line, Bounds, Center } from '@react-three/drei';
 import * as THREE from 'three';
+
+class CanvasErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("3D Canvas error caught:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          position: 'absolute',
+          inset: '1.5rem',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgba(30, 41, 59, 0.8)',
+          backdropFilter: 'blur(12px)',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          borderRadius: '12px',
+          color: '#f8fafc',
+          padding: '2rem',
+          textAlign: 'center',
+          boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.37)'
+        }}>
+          <h3 style={{ margin: '0 0 0.5rem 0', fontWeight: 600, color: '#ef4444', fontSize: '1.25rem' }}>3D Rendering Error</h3>
+          <p style={{ margin: '0 0 1.5rem 0', opacity: 0.8, maxWidth: '400px', fontSize: '0.875rem' }}>
+            {this.state.error?.message || "An error occurred while compiling the 3D scene."}
+          </p>
+          <button 
+            onClick={() => this.setState({ hasError: false, error: null })}
+            style={{
+              padding: '8px 20px',
+              background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 600,
+              boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)',
+              transition: 'all 0.2s'
+            }}
+          >
+            Retry Render
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function MeshBuilder({ geometry }) {
   const meshes = useMemo(() => {
@@ -28,9 +88,14 @@ function MeshBuilder({ geometry }) {
 
   const partingLines = useMemo(() => {
     const lines = [];
-    geometry.parting_lines.forEach((pts, idx) => {
-      if (!pts || pts.length < 2) return;
-      lines.push({ pts, id: `pl-${idx}` });
+    if (!geometry || !geometry.parting_lines) return lines;
+    
+    geometry.parting_lines.forEach((loop, loopIdx) => {
+      if (!loop || !loop.segments) return;
+      loop.segments.forEach((seg, segIdx) => {
+        if (!seg || seg.length < 2) return;
+        lines.push({ pts: seg, id: `pl-${loopIdx}-${segIdx}` });
+      });
     });
     return lines;
   }, [geometry]);
@@ -81,24 +146,84 @@ function MeshBuilder({ geometry }) {
   );
 }
 
+// Camera controller that exposes a method to snap to preset views
+function CameraController({ controlsRef }) {
+  const { camera } = useThree();
+  
+  // Store camera ref for external use
+  React.useEffect(() => {
+    if (controlsRef) {
+      controlsRef.current = { camera };
+    }
+  }, [camera, controlsRef]);
+
+  return (
+    <OrbitControls 
+      makeDefault 
+      enableDamping 
+      dampingFactor={0.1} 
+      rotateSpeed={0.8}
+      zoomSpeed={1.2}
+      panSpeed={0.8}
+    />
+  );
+}
+
+const VIEW_PRESETS = [
+  { label: 'Front', icon: '▣', pos: [0, 0, 50] },
+  { label: 'Back', icon: '▣', pos: [0, 0, -50] },
+  { label: 'Top', icon: '⬆', pos: [0, 50, 0.01] },
+  { label: 'Bottom', icon: '⬇', pos: [0, -50, 0.01] },
+  { label: 'Left', icon: '◀', pos: [-50, 0, 0] },
+  { label: 'Right', icon: '▶', pos: [50, 0, 0] },
+  { label: 'ISO', icon: '◇', pos: [35, 25, 35] },
+];
+
 export default function ModelViewer({ geometry }) {
+  const cameraRef = useRef(null);
+
+  const handleViewClick = useCallback((pos) => {
+    if (!cameraRef.current) return;
+    const { camera } = cameraRef.current;
+    camera.position.set(pos[0], pos[1], pos[2]);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+  }, []);
+
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <Canvas camera={{ position: [0, 0, 50], fov: 45 }}>
-        <color attach="background" args={['transparent']} />
-        <ambientLight intensity={0.5} />
-        <directionalLight position={[10, 10, 10]} intensity={1} />
-        <directionalLight position={[-10, -10, -10]} intensity={0.5} />
-        
-        <Center>
-          <Bounds fit clip observe margin={1.2}>
-            <MeshBuilder geometry={geometry} />
-          </Bounds>
-        </Center>
-        <ContactShadows position={[0, -10, 0]} opacity={0.5} scale={100} blur={2} far={20} />
+      <CanvasErrorBoundary>
+        <Canvas camera={{ position: [0, 0, 50], fov: 45 }}>
+          <color attach="background" args={['transparent']} />
+          <ambientLight intensity={0.5} />
+          <directionalLight position={[10, 10, 10]} intensity={1} />
+          <directionalLight position={[-10, -10, -10]} intensity={0.5} />
+          
+          <Center>
+            <Bounds fit clip observe margin={1.2}>
+              <MeshBuilder geometry={geometry} />
+            </Bounds>
+          </Center>
+          <ContactShadows position={[0, -10, 0]} opacity={0.5} scale={100} blur={2} far={20} />
 
-        <OrbitControls makeDefault autoRotate autoRotateSpeed={1.5} />
-      </Canvas>
+          <CameraController controlsRef={cameraRef} />
+        </Canvas>
+      </CanvasErrorBoundary>
+
+      {/* View Navigation Panel */}
+      <div className="view-nav-panel">
+        {VIEW_PRESETS.map(({ label, icon, pos }) => (
+          <button
+            key={label}
+            className="view-nav-btn"
+            title={label}
+            onClick={() => handleViewClick(pos)}
+          >
+            <span className="view-nav-icon">{icon}</span>
+            <span className="view-nav-label">{label}</span>
+          </button>
+        ))}
+      </div>
       
       <div className="legend-overlay">
         <div className="legend-item">
@@ -117,3 +242,4 @@ export default function ModelViewer({ geometry }) {
     </div>
   );
 }
+
