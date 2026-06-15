@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Canvas } from '@react-three/fiber';
+import React, { useMemo, useRef, useCallback } from 'react';
+import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls, Environment, ContactShadows, Edges, Line, Bounds, Center } from '@react-three/drei';
 import * as THREE from 'three';
 
@@ -146,7 +146,50 @@ function MeshBuilder({ geometry }) {
   );
 }
 
+// Camera controller that exposes a method to snap to preset views
+function CameraController({ controlsRef }) {
+  const { camera } = useThree();
+  
+  // Store camera ref for external use
+  React.useEffect(() => {
+    if (controlsRef) {
+      controlsRef.current = { camera };
+    }
+  }, [camera, controlsRef]);
+
+  return (
+    <OrbitControls 
+      makeDefault 
+      enableDamping 
+      dampingFactor={0.1} 
+      rotateSpeed={0.8}
+      zoomSpeed={1.2}
+      panSpeed={0.8}
+    />
+  );
+}
+
+const VIEW_PRESETS = [
+  { label: 'Front', icon: '▣', pos: [0, 0, 50] },
+  { label: 'Back', icon: '▣', pos: [0, 0, -50] },
+  { label: 'Top', icon: '⬆', pos: [0, 50, 0.01] },
+  { label: 'Bottom', icon: '⬇', pos: [0, -50, 0.01] },
+  { label: 'Left', icon: '◀', pos: [-50, 0, 0] },
+  { label: 'Right', icon: '▶', pos: [50, 0, 0] },
+  { label: 'ISO', icon: '◇', pos: [35, 25, 35] },
+];
+
 export default function ModelViewer({ geometry }) {
+  const cameraRef = useRef(null);
+
+  const handleViewClick = useCallback((pos) => {
+    if (!cameraRef.current) return;
+    const { camera } = cameraRef.current;
+    camera.position.set(pos[0], pos[1], pos[2]);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+  }, []);
+
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <CanvasErrorBoundary>
@@ -163,9 +206,24 @@ export default function ModelViewer({ geometry }) {
           </Center>
           <ContactShadows position={[0, -10, 0]} opacity={0.5} scale={100} blur={2} far={20} />
 
-          <OrbitControls makeDefault autoRotate autoRotateSpeed={1.5} />
+          <CameraController controlsRef={cameraRef} />
         </Canvas>
       </CanvasErrorBoundary>
+
+      {/* View Navigation Panel */}
+      <div className="view-nav-panel">
+        {VIEW_PRESETS.map(({ label, icon, pos }) => (
+          <button
+            key={label}
+            className="view-nav-btn"
+            title={label}
+            onClick={() => handleViewClick(pos)}
+          >
+            <span className="view-nav-icon">{icon}</span>
+            <span className="view-nav-label">{label}</span>
+          </button>
+        ))}
+      </div>
       
       <div className="legend-overlay">
         <div className="legend-item">
@@ -184,3 +242,4 @@ export default function ModelViewer({ geometry }) {
     </div>
   );
 }
+
