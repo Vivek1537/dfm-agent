@@ -90,12 +90,9 @@ function MeshBuilder({ geometry }) {
     const lines = [];
     if (!geometry || !geometry.parting_lines) return lines;
     
-    geometry.parting_lines.forEach((loop, loopIdx) => {
-      if (!loop || !loop.segments) return;
-      loop.segments.forEach((seg, segIdx) => {
-        if (!seg || seg.length < 2) return;
-        lines.push({ pts: seg, id: `pl-${loopIdx}-${segIdx}` });
-      });
+    geometry.parting_lines.forEach((seg, segIdx) => {
+      if (!seg || seg.length < 2) return;
+      lines.push({ pts: seg, id: `pl-${segIdx}` });
     });
     return lines;
   }, [geometry]);
