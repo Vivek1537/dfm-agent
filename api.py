@@ -4,7 +4,7 @@ import tempfile
 import os
 import cadquery as cq
 
-from gui.analyzer import analyze_part
+from core.analyzer import analyze_part
 from core.parting_line import compute_parting_line_result
 
 app = FastAPI(title="DfM API")
@@ -135,8 +135,8 @@ async def analyze_endpoint(file: UploadFile = File(...), debug: bool = False):
         os.unlink(tmp_filepath)
 
 from fastapi.responses import FileResponse
-from gui.visualization import create_3d_snapshot
-from gui.report import generate_pdf_report
+from core.visualization import create_3d_snapshot
+from core.report import generate_pdf_report
 
 @app.post("/report")
 async def report_endpoint(file: UploadFile = File(...)):
