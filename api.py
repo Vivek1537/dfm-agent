@@ -5,6 +5,7 @@ import os
 import cadquery as cq
 
 from gui.analyzer import analyze_part
+from core.parting_line import compute_parting_line_result
 
 app = FastAPI(title="DfM API")
 
@@ -17,7 +18,7 @@ app.add_middleware(
 )
 
 @app.post("/analyze")
-async def analyze_endpoint(file: UploadFile = File(...)):
+async def analyze_endpoint(file: UploadFile = File(...), debug: bool = False):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".stp") as tmp_file:
         content = await file.read()
         tmp_file.write(content)
@@ -27,19 +28,16 @@ async def analyze_endpoint(file: UploadFile = File(...)):
         # Run backend logic
         result = analyze_part(tmp_filepath, file.filename)
 
-        # Convert to JSON serializable representation
+        # Convert faces to JSON-serializable tessellated representation
         faces_data = []
         for face_data in result.faces:
             if not face_data.face_shape:
                 continue
-            
             try:
                 cq_face = cq.Face(face_data.face_shape)
                 vertices, triangles = cq_face.tessellate(0.1)
-                
                 if not vertices or not triangles:
                     continue
-                
                 faces_data.append({
                     "classification": face_data.classification,
                     "vertices": [[v.x, v.y, v.z] for v in vertices],
@@ -47,67 +45,72 @@ async def analyze_endpoint(file: UploadFile = File(...)):
                 })
             except Exception:
                 pass
-                
-        def count_loops(raw_edges):
-            from collections import defaultdict
-            import cadquery as cq
-            adj = defaultdict(list)
-            edges = []
-            for e in raw_edges:
-                try:
-                    edges.append(cq.Edge(e))
-                except: pass
-            
-            for i, cq_e in enumerate(edges):
-                try:
-                    v1, v2 = cq_e.startPoint(), cq_e.endPoint()
-                    p1 = (round(v1.x,2), round(v1.y,2), round(v1.z,2))
-                    p2 = (round(v2.x,2), round(v2.y,2), round(v2.z,2))
-                    adj[p1].append(i)
-                    adj[p2].append(i)
-                except:
-                    pass
-            
-            visited = set()
-            loops = 0
-            for i in range(len(edges)):
-                if i not in visited:
-                    loops += 1
-                    q = [i]
-                    while q:
-                        curr = q.pop()
-                        visited.add(curr)
-                        try:
-                            cq_e = edges[curr]
-                            v1, v2 = cq_e.startPoint(), cq_e.endPoint()
-                            p1 = (round(v1.x,2), round(v1.y,2), round(v1.z,2))
-                            p2 = (round(v2.x,2), round(v2.y,2), round(v2.z,2))
-                            for n in adj[p1] + adj[p2]:
-                                if n not in visited:
-                                    visited.add(n)
-                                    q.append(n)
-                        except: pass
-            return loops
-            
-        parting_line_data = []
-        loop_count = 0
-        if result.parting_line_edges:
-            loop_count = count_loops(result.parting_line_edges)
-            for edge in result.parting_line_edges:
-                try:
-                    cq_edge = cq.Edge(edge)
-                    # Sample 10 points along the edge
-                    pts = [cq_edge.positionAt(t / 10.0) for t in range(11)]
-                    parsed_pts = [[v.x, v.y, v.z] for v in pts]
-                    parting_line_data.append(parsed_pts)
-                except Exception as e:
-                    print(f"EDGE TESSELLATE ERROR: {e}")
-                    pass
+
+        # ── Parting line: use full PartingLineResult ──────────────────────
+        pl_result = compute_parting_line_result(
+            result.raw_shape, result.faces, result.best_mold_direction
+        )
+
+        def _tessellate_edge(edge):
+            """Sample 11 points along an OCP edge for frontend line rendering."""
+            try:
+                cq_edge = cq.Edge(edge)
+                pts = [cq_edge.positionAt(t / 10.0) for t in range(11)]
+                return [[v.x, v.y, v.z] for v in pts]
+            except Exception:
+                return []
+
+        # Primary parting line loop — always included
+        primary_segments = []
+        for edge in pl_result.primary_loop.edges:
+            pts = _tessellate_edge(edge)
+            if pts:
+                primary_segments.append(pts)
+
+        parting_lines = [{
+            "loop_id": 0,
+            "candidate_id": pl_result.primary_loop.candidate_id,
+            "is_primary": True,
+            "score": pl_result.primary_loop.score,
+            "segments": primary_segments,
+        }]
+
+        # Debug: include all candidate loops
+        parting_line_debug = None
+        if debug:
+            candidates_summary = []
+            for c in pl_result.all_candidates:
+                cand_segments = []
+                for edge in c.edges:
+                    pts = _tessellate_edge(edge)
+                    if pts:
+                        cand_segments.append(pts)
+                candidates_summary.append({
+                    "candidate_id": c.candidate_id,
+                    "score": c.score,
+                    "projected_area": c.projected_area,
+                    "loop_length": c.loop_length,
+                    "outer_boundary_confidence": c.outer_boundary_confidence,
+                    "moldability_contribution": c.moldability_contribution,
+                    "simplicity": c.simplicity,
+                    "separation_quality": c.separation_quality,
+                    "num_edges": c.num_edges,
+                    "is_selected": c.is_selected,
+                    "segments": cand_segments,
+                })
+            parting_line_debug = {
+                "total_candidates": pl_result.total_candidate_count,
+                "is_ambiguous": pl_result.is_ambiguous,
+                "candidates": candidates_summary,
+            }
 
         from core.mold_direction import CANDIDATE_DIRECTIONS
-        best_dir_label = next((l for d, l in CANDIDATE_DIRECTIONS if d == result.best_mold_direction), str(result.best_mold_direction))
+        best_dir_label = next(
+            (l for d, l in CANDIDATE_DIRECTIONS if d == result.best_mold_direction),
+            str(result.best_mold_direction)
+        )
 
-        return {
+        response = {
             "part_name": result.part_name,
             "total_faces": result.total_faces,
             "score": result.manufacturability_score,
@@ -119,10 +122,15 @@ async def analyze_endpoint(file: UploadFile = File(...)):
             "best_direction_label": best_dir_label,
             "geometry": {
                 "faces": faces_data,
-                "parting_lines": parting_line_data,
-                "parting_line_loops": loop_count
+                "parting_lines": parting_lines,
+                "parting_line_loops": pl_result.total_candidate_count,
+                "parting_line_is_ambiguous": pl_result.is_ambiguous,
             }
         }
+        if parting_line_debug is not None:
+            response["parting_line_debug"] = parting_line_debug
+
+        return response
     finally:
         os.unlink(tmp_filepath)
 
