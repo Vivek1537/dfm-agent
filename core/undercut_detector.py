@@ -24,7 +24,7 @@ from OCP.gp import gp_Lin, gp_Dir, gp_Pnt
 # Minimum ray hit distance (mm). Hits closer than this are treated as
 # wall-thickness artifacts (e.g., inner face → shell wall → outer face)
 # and NOT counted as true undercuts.
-MIN_HIT_DISTANCE = 2.0
+MIN_HIT_DISTANCE = 0.01
 
 
 def _dot(a: Tuple[float, float, float],
@@ -86,10 +86,13 @@ def detect_undercuts(
             face.is_undercut = is_trapped_in_dir(neg_dir)
         else:
             # Near-perpendicular wall (within ~0.6° of parting plane).
-            # Use a CONSISTENT direction (always mold_direction) so that
-            # mirror-symmetric faces get identical treatment — no floating
-            # point sign-bit asymmetry.
-            face.is_undercut = is_trapped_in_dir(mold_direction)
+            # A vertical wall is only an undercut if it is trapped from BOTH
+            # the core and cavity directions.
+            neg_dir = (-mold_direction[0], -mold_direction[1], -mold_direction[2])
+            face.is_undercut = (
+                is_trapped_in_dir(mold_direction)
+                and is_trapped_in_dir(neg_dir)
+            )
 
     return faces
 

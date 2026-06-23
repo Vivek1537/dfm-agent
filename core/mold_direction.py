@@ -15,7 +15,7 @@ from core.undercut_detector import detect_undercuts
 _INV_SQRT2 = 1.0 / math.sqrt(2.0)
 
 CANDIDATE_DIRECTIONS: List[Tuple[Tuple[float, float, float], str]] = [
-    ((0.0, 0.0, 1.0),  "Z+"), ((0.0, 0.0, -1.0), "Z-"),
+    ((0.0, 0.0, -1.0), "Z-"), ((0.0, 0.0, 1.0),  "Z+"),
     ((1.0, 0.0, 0.0),  "X+"), ((-1.0, 0.0, 0.0), "X-"),
     ((0.0, 1.0, 0.0),  "Y+"), ((0.0, -1.0, 0.0), "Y-"),
     ((_INV_SQRT2, 0.0, _INV_SQRT2),  "X+Z+"), ((_INV_SQRT2, 0.0, -_INV_SQRT2), "X+Z-"),
