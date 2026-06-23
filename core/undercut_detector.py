@@ -62,7 +62,7 @@ def detect_undercuts(
         dot_val = _dot(face.normal, mold_direction)
 
         def is_trapped_in_dir(p_dir: Tuple[float, float, float]) -> bool:
-            epsilon = 0.1
+            epsilon = 0.001
             ox = face.center[0] + face.normal[0] * epsilon
             oy = face.center[1] + face.normal[1] * epsilon
             oz = face.center[2] + face.normal[2] * epsilon
