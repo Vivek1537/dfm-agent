@@ -134,25 +134,3 @@ async def analyze_endpoint(file: UploadFile = File(...), debug: bool = False):
     finally:
         os.unlink(tmp_filepath)
 
-from fastapi.responses import FileResponse
-from core.visualization import create_3d_snapshot
-from core.report import generate_pdf_report
-
-@app.post("/report")
-async def report_endpoint(file: UploadFile = File(...)):
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".stp") as tmp_file:
-        content = await file.read()
-        tmp_file.write(content)
-        tmp_filepath = tmp_file.name
-        
-    try:
-        result = analyze_part(tmp_filepath, file.filename)
-        snapshot_path = os.path.join(tempfile.gettempdir(), "dfm_snapshot.png")
-        report_path = os.path.join(tempfile.gettempdir(), "dfm_report.pdf")
-        
-        create_3d_snapshot(result.faces, result.parting_line_edges, snapshot_path)
-        generate_pdf_report(result, snapshot_path, report_path)
-        
-        return FileResponse(path=report_path, filename=f"{result.part_name}_DfM_Report.pdf", media_type='application/pdf')
-    finally:
-        os.unlink(tmp_filepath)
