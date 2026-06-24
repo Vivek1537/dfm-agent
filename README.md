@@ -22,7 +22,7 @@
 
 **dfm-agent** is a rapid manufacturing analysis engine. By ingesting standard `.stp`/`.step` CAD files, it provides instant, interactive 3D feedback on manufacturability constraints, eliminating hours of manual geometry inspection.
 
-> **Hackathon Ready**: Designed for automotive injection-molded components — reduces DfM review cycles from 3–4 hours of manual expert inspection to 5–10 minutes of automated analysis. 
+
 
 
 <br />
