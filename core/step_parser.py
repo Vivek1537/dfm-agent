@@ -34,6 +34,9 @@ from OCP.GeomAbs import (
 )
 from OCP.GeomLProp import GeomLProp_SLProps
 from OCP.TopoDS import TopoDS
+from OCP.BRepClass import BRepClass_FaceClassifier
+from OCP.gp import gp_Pnt2d
+from OCP.TopAbs import TopAbs_IN, TopAbs_ON
 
 from core.models import FaceData
 
@@ -78,6 +81,25 @@ def _get_face_normal(face, adaptor: BRepAdaptor_Surface) -> Tuple[Tuple[float, f
 
     u_mid = (u_min + u_max) / 2.0
     v_mid = (v_min + v_max) / 2.0
+
+    classifier = BRepClass_FaceClassifier()
+    classifier.Perform(face, gp_Pnt2d(u_mid, v_mid), 1e-6)
+    
+    # If midpoint is in a hole or outside the trimmed face, search for a valid point
+    if classifier.State() != TopAbs_IN:
+        found = False
+        for steps in (10, 50):  # Coarse then dense grid
+            if found: break
+            for i in range(1, steps):
+                u = u_min + (u_max - u_min) * (i / float(steps))
+                for j in range(1, steps):
+                    v = v_min + (v_max - v_min) * (j / float(steps))
+                    classifier.Perform(face, gp_Pnt2d(u, v), 1e-6)
+                    if classifier.State() == TopAbs_IN:
+                        u_mid, v_mid = u, v
+                        found = True
+                        break
+                if found: break
 
     # Extract the underlying Geom_Surface from the TopoDS_Face
     geom_surface = BRep_Tool.Surface_s(face)

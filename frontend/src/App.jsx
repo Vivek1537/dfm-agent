@@ -50,24 +50,6 @@ function App() {
     );
   };
 
-  const handleDownloadReport = async () => {
-    if (!selectedFile) return;
-    const formData = new FormData();
-    formData.append('file', selectedFile);
-    try {
-      const res = await axios.post('http://localhost:8000/report', formData, { responseType: 'blob' });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', 'DfM_Report.pdf');
-      document.body.appendChild(link);
-      link.click();
-      link.parentNode.removeChild(link);
-    } catch (err) {
-      setError("Failed to download PDF report");
-    }
-  };
-
   return (
     <div className="app-container">
       <div className="dashboard">
@@ -181,21 +163,6 @@ function App() {
               </div>
             </div>
 
-            <div style={{ marginTop: '1.5rem' }}>
-              <button onClick={handleDownloadReport} style={{
-                width: '100%',
-                padding: '12px',
-                background: 'linear-gradient(135deg, var(--primary), #2563eb)',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-              }}>
-                📄 Download PDF Report
-              </button>
-            </div>
           </>
         )}
       </div>
