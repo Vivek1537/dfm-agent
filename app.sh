@@ -5,7 +5,7 @@ cd "$(dirname "$0")"
 
 # --- BACKEND SETUP ---
 if [ ! -d ".venv" ]; then
-    echo "📦 First time setup: Finding compatible Python version (3.10 to 3.12)..."
+    echo "First time setup: Finding compatible Python version (3.10 to 3.12)..."
     
     BEST_PYTHON=""
     for py in python3.12 python3.11 python3.10 python3; do
@@ -21,18 +21,18 @@ if [ ! -d ".venv" ]; then
     done
 
     if [ -z "$BEST_PYTHON" ]; then
-        echo "❌ ERROR: Could not find Python 3.10, 3.11, or 3.12 installed on your system."
+        echo "ERROR: Could not find Python 3.10, 3.11, or 3.12 installed on your system."
         echo "CadQuery requires one of these versions. Please install Python 3.12 and try again."
         exit 1
     fi
 
-    echo "✅ Using $BEST_PYTHON to create virtual environment..."
+    echo "Using $BEST_PYTHON to create virtual environment..."
     "$BEST_PYTHON" -m venv .venv
     
-    echo "⏳ Installing backend requirements. This might take a minute..."
+    echo "Installing backend requirements. This might take a minute..."
     source .venv/bin/activate
     if ! pip install -r requirements.txt; then
-        echo "❌ ERROR: Failed to install Python dependencies. Please check the logs above."
+        echo "ERROR: Failed to install Python dependencies. Please check the logs above."
         exit 1
     fi
 else
@@ -41,31 +41,31 @@ fi
 
 # Double check that uvicorn exists before starting
 if [ ! -f ".venv/bin/uvicorn" ]; then
-    echo "❌ ERROR: uvicorn is missing. The virtual environment might be corrupted."
+    echo "ERROR: uvicorn is missing. The virtual environment might be corrupted."
     echo "Please run: rm -rf .venv && ./app.sh"
     exit 1
 fi
 
-echo "🟢 Starting FastAPI backend..."
+echo "Starting FastAPI backend..."
 nohup .venv/bin/uvicorn api:app --reload > backend.log 2>&1 &
 echo $! > .backend.pid
 
 # --- FRONTEND SETUP ---
 cd frontend
 if [ ! -d "node_modules" ]; then
-    echo "📦 First time setup: Installing frontend dependencies..."
+    echo "First time setup: Installing frontend dependencies..."
     if ! npm install; then
-        echo "❌ ERROR: Failed to install frontend dependencies."
+        echo "ERROR: Failed to install frontend dependencies."
         exit 1
     fi
 fi
 
-echo "🟢 Starting Vite frontend..."
+echo "Starting Vite frontend..."
 nohup npm run dev > frontend.log 2>&1 &
 echo $! > ../.frontend.pid
 
 echo ""
-echo "🚀 Both servers are running in the background!"
-echo "🌐 Backend is available at http://127.0.0.1:8000"
-echo "🌐 Frontend is available at http://localhost:5173"
-echo "🛑 To stop them, run: ./stop.sh"
+echo "Both servers are running in the background!"
+echo "Backend is available at http://127.0.0.1:8000"
+echo "Frontend is available at http://localhost:5173"
+echo "To stop them, run: ./stop.sh"
