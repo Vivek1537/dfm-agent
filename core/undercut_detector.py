@@ -108,16 +108,3 @@ def get_undercut_summary(faces: List[FaceData]) -> dict:
         "undercut_area": undercut_area,
         "undercut_percentage": (undercut_area / total_area * 100) if total_area > 0 else 0.0,
     }
-
-
-if __name__ == "__main__":
-    import os
-    import sys
-    from core.step_parser import parse_step
-
-    stp_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join("assets", "Part1.stp")
-    faces = parse_step(stp_path)
-    direction = (0.0, 0.0, 1.0) # Assume Z+ for test
-    detect_undercuts(faces, direction)
-    summary = get_undercut_summary(faces)
-    print(f"Undercuts (Raycast): {summary['undercut_count']} / {summary['total_faces']}")
