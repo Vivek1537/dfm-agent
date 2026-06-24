@@ -12,7 +12,7 @@ This document records the key architectural and technical decisions made during 
 
 ## 2. Undercut Detection Algorithm
 **Context**: We needed a reliable way to determine if a face is an undercut (trapped) for a given mold pull direction.
-**Decision**: We implemented physical raycasting using OpenCASCADE (`IntCurvesFace_ShapeIntersector`). For each face, a ray is cast from its center in its pulling direction. If it hits another part of the geometry beyond a minimum thickness threshold (2mm), it is flagged as an undercut.
+**Decision**: We implemented physical raycasting using OpenCASCADE (`IntCurvesFace_ShapeIntersector`). For each face, a ray is cast from its center in its pulling direction. If it hits another part of the geometry beyond a minimum thickness threshold (0.01mm), it is flagged as an undercut.
 **Rationale**: Simple draft angle checks are insufficient for identifying true undercuts (e.g., internal features that might have positive draft but are blocked from above). Raycasting provides a physical simulation of the mold opening.
 
 ## 3. Resolving Raycast Symmetry Issues

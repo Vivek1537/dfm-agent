@@ -32,8 +32,6 @@ A comprehensive score from 0 to 100 is generated based on a weighted penalty for
 ### 6. Interactive 3D Visualization
 The frontend features a high-fidelity, interactive 3D viewer built with React Three Fiber. Users can rotate, pan, and zoom their model. The faces are color-coded based on their DfM classification (e.g., bright red for undercuts, grey for core/cavity), and the parting line is highlighted with a vivid cyan wireframe.
 
-### 7. Automated PDF Reporting
-With a single click, users can generate and download a professional PDF report summarizing the DfM analysis, complete with a static 3D snapshot of their analyzed part.
 
 ## Future Roadmap
 - Support for complex side-actions (sliders and lifters) in the undercut detection algorithm.

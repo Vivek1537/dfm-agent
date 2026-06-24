@@ -7,7 +7,7 @@ This document outlines the architecture and technical implementation details of 
 The application follows a modern client-server architecture:
 
 ### 1.1 Backend (Python / FastAPI)
-- **Framework**: FastAPI is used to expose RESTful endpoints (`/analyze`, `/report`).
+- **Framework**: FastAPI is used to expose the RESTful endpoint (`/analyze`).
 - **Geometry Kernel**: OpenCASCADE (via the `cadquery` wrapper and direct `OCP` bindings). This handles all STEP file parsing, topological operations, and raycasting physics.
 - **Role**: The backend receives a STEP file, parses the geometry, executes the DfM algorithms (mold direction search, undercut detection, draft analysis, parting line extraction), and returns a JSON payload containing the analysis results and tessellated geometry data for rendering.
 
@@ -56,4 +56,3 @@ The `compute_score` function generates a 0-100 score using a penalty-based formu
 
 ## 4. API Endpoints
 - `POST /analyze`: Accepts a multipart form data file (`.stp` or `.step`). Returns a JSON object containing the `score`, `best_direction`, metrics counts, and a `geometry` object containing tessellated `vertices`, `triangles`, and `parting_lines`.
-- `POST /report`: Accepts the same file format, runs the analysis, generates a static PyVista 3D snapshot, compiles a PDF report using ReportLab, and returns the binary PDF file.
