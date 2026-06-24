@@ -25,7 +25,7 @@
 > **Hackathon Ready**: Designed for automotive injection-molded components — reduces DfM review cycles from 3–4 hours of manual expert inspection to 5–10 minutes of automated analysis. 
 
 <div align="center">
-  <img src="assets/demo.png" alt="Demo Screenshot" width="800">
+  <img src="assets/demo.jpg" alt="Demo Screenshot" width="800">
   <br />
   <em>Interactive 3D viewer featuring Core/Cavity outlines, Undercut detection, and Parting Lines.</em><br/>
 </div>
@@ -103,7 +103,7 @@ dfm-agent/
 <div align="center">
   <h3>Submitted for the DfM Agent Hackathon</h3>
   <p>
-    <strong>Team Members:</strong> Vivek Boora, Ayush Pandey, Nitin
+    <strong>Team Members:</strong> Vivek Boora, Ayush Pandey, Nitin, Afeera
   </p>
   <br />
   <em>Built for rapid prototyping and modern manufacturing.</em>
