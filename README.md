@@ -25,8 +25,9 @@
 > **Hackathon Ready**: Designed for automotive injection-molded components — reduces DfM review cycles from 3–4 hours of manual expert inspection to 5–10 minutes of automated analysis. 
 
 <div align="center">
+  <img src="assets/demo.png" alt="Demo Screenshot" width="800">
+  <br />
   <em>Interactive 3D viewer featuring Core/Cavity outlines, Undercut detection, and Parting Lines.</em><br/>
-  <strong>(Please add a screenshot of your app running here!)</strong>
 </div>
 
 <br />
