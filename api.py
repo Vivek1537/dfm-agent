@@ -26,7 +26,11 @@ async def analyze_endpoint(file: UploadFile = File(...), debug: bool = False):
 
     try:
         # Run backend logic
-        result = analyze_part(tmp_filepath, file.filename)
+        try:
+            result = analyze_part(tmp_filepath, file.filename)
+        except RuntimeError as e:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=400, content={"detail": f"Invalid CAD file: {str(e)}"})
 
         # Convert faces to JSON-serializable tessellated representation
         faces_data = []
