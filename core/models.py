@@ -22,14 +22,22 @@ class FaceData:
     face_id: int
     face_shape: Any                          # OCP TopoDS_Face object (opaque to Person B)
     center: Tuple[float, float, float]       # (x, y, z) UV midpoint of the face
-    normal: Tuple[float, float, float]       # (nx, ny, nz) outward unit normal
+    normal: Tuple[float, float, float]       # (nx, ny, nz) outward unit normal (representative)
     area: float                              # surface area in mm²
     surface_type: str                        # "PLANE" / "CYLINDER" / "CONE" / "SPHERE" / "TORUS" / "BSPLINE"
 
+    # ── Multi-point surface sampling (curved faces need >1 normal) ──
+    sample_points: List[Tuple[float, float, float]] = field(default_factory=list)
+    sample_normals: List[Tuple[float, float, float]] = field(default_factory=list)
+    axis: Any = None                         # cylinder/cone axis direction, if applicable
+
     # ── Filled by analysis steps (Steps 3–5) ──
-    classification: str = ""                 # "core" / "cavity" / "undercut" / "warning"
-    draft_angle: float = 0.0                 # in degrees (negative = undercut)
+    classification: str = ""                 # "core" / "cavity" / "undercut"
+    mold_half: str = ""                      # "core" / "cavity" — which half FORMS this face (always set)
+    low_draft: bool = False                  # True when draft angle < 1° (ejection friction risk)
+    draft_angle: float = 0.0                 # in degrees (worst-case across samples)
     is_undercut: bool = False
+    trapped_fraction: float = 0.0            # fraction of surface samples that are trapped [0, 1]
 
 
 @dataclass
@@ -52,6 +60,8 @@ class AnalysisResult:
     direction_candidates: List[DirectionCandidate]
     faces: List[FaceData]
     raw_shape: Any = None
+    best_direction_label: str = ""
+    is_override: bool = False
 
     # ── Filled by Person B (parting line detection) ──
     parting_line_edges: List[Any] = field(default_factory=list)
@@ -81,7 +91,7 @@ def compute_score(faces: List[FaceData]) -> float:
         return 0.0
 
     bad_faces = [f for f in faces if f.is_undercut]
-    warn_faces = [f for f in faces if f.draft_angle < 1.0 and not f.is_undercut]
+    warn_faces = [f for f in faces if f.low_draft and not f.is_undercut]
 
     bad_area = sum(f.area for f in bad_faces)
     warn_area = sum(f.area for f in warn_faces)
