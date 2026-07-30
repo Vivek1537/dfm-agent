@@ -153,6 +153,7 @@ async def analyze_endpoint(
                     "label": c.label,
                     "undercut_count": c.undercut_count,
                     "undercut_area": round(c.undercut_area, 1),
+                    "pruned": c.pruned,
                 }
                 for c in sorted(
                     result.direction_candidates,

@@ -55,7 +55,7 @@ def analyze_part(filepath: str, part_name: str, override_direction: Optional[Tup
     compute_draft_angles(faces, direction_to_use)
 
     # 4. Assign mold halves + classify (core, cavity, undercut)
-    classify_faces(faces, direction_to_use)
+    classify_faces(faces, direction_to_use, raycaster)
 
     # 5. Extract Parting Line
     pl_edges = find_parting_line(shape, faces, direction_to_use)

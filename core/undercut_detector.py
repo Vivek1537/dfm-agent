@@ -154,15 +154,29 @@ def evaluate_direction(
     faces: List[FaceData],
     mold_direction: Tuple[float, float, float],
     max_samples_per_face: Optional[int] = None,
-) -> List[FaceData]:
+    abort_above_area: Optional[float] = None,
+) -> Tuple[int, float]:
     """
     Flag each face as undercut for `mold_direction` using per-sample raycasts.
     Updates face.is_undercut and face.trapped_fraction in place.
+
+    Returns (undercut_count, undercut_area). When `abort_above_area` is
+    given, evaluation runs biggest-faces-first and stops as soon as the
+    accumulated undercut area exceeds it (branch-and-bound pruning during
+    the axis sweep) — the returned partial values are then lower bounds
+    that are already worse than the incumbent best axis.
     """
     pull = mold_direction
     neg_pull = (-pull[0], -pull[1], -pull[2])
 
-    for face in faces:
+    ordered = (
+        sorted(faces, key=lambda f: -f.area)
+        if abort_above_area is not None else faces
+    )
+
+    uc_count = 0
+    uc_area = 0.0
+    for face in ordered:
         pts, nrms = _face_samples(face, max_samples_per_face)
         total = len(pts)
         need = total * UNDERCUT_FRACTION_THRESHOLD
@@ -178,8 +192,29 @@ def evaluate_direction(
 
         face.trapped_fraction = trapped / total if total else 0.0
         face.is_undercut = total > 0 and trapped >= need
+        if face.is_undercut:
+            uc_count += 1
+            uc_area += face.area
+            if abort_above_area is not None and uc_area > abort_above_area:
+                break
 
-    return faces
+    return uc_count, uc_area
+
+
+def refine_direction(
+    raycaster: UndercutRaycaster,
+    faces: List[FaceData],
+    mold_direction: Tuple[float, float, float],
+) -> None:
+    """Full-resolution re-evaluation of SUSPICIOUS faces only.
+
+    After a low-resolution sweep pass, faces with zero trapped samples
+    keep their free verdict — evenly-spread sweep samples all escaping
+    while the full set is majority-trapped is geometrically implausible.
+    Every face that showed any trapping is re-checked with all samples.
+    """
+    borderline = [f for f in faces if f.trapped_fraction > 0.0]
+    evaluate_direction(raycaster, borderline, mold_direction)
 
 
 def detect_undercuts(
@@ -195,7 +230,8 @@ def detect_undercuts(
     if not faces:
         return faces
     raycaster = UndercutRaycaster(faces)
-    return evaluate_direction(raycaster, faces, mold_direction, max_samples_per_face)
+    evaluate_direction(raycaster, faces, mold_direction, max_samples_per_face)
+    return faces
 
 
 def get_undercut_summary(faces: List[FaceData]) -> dict:

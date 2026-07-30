@@ -48,6 +48,7 @@ class DirectionCandidate:
     label: str                               # human-readable: "Z+" / "Z-" / "X+Y+" etc.
     undercut_count: int                      # number of faces that are undercut
     undercut_area: float                     # total undercut area in mm²
+    pruned: bool = False                     # True: evaluation aborted early — count/area are lower bounds
 
 
 @dataclass

@@ -188,8 +188,8 @@ function App() {
                       }}
                     >
                       <span>{c.label}{isActive ? ' (auto-best)' : ''}</span>
-                      <span style={{ color: c.undercut_count === 0 ? '#10b981' : '#f59e0b' }}>
-                        {c.undercut_count} undercuts
+                      <span style={{ color: c.undercut_count === 0 && !c.pruned ? '#10b981' : '#f59e0b' }}>
+                        {c.pruned ? '≥' : ''}{c.undercut_count} undercuts
                       </span>
                     </button>
                   );
