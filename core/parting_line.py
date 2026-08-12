@@ -92,6 +92,101 @@ def _edge_vertex_set(edge: Any) -> frozenset:
     return frozenset(_edge_vertex_coords(edge))
 
 
+def _edge_polyline(edge: Any, n: int = 8) -> List[Tuple[float, float, float]]:
+    """Tessellate an edge into n+1 ordered 3D points along its curve.
+
+    Long curved edges (arcs, splines) carry the loop's real shape between
+    their two endpoints — endpoint-only sampling collapses e.g. a circular
+    rim made of 2 semicircular edges into a zero-area 2-point 'polygon'.
+    """
+    try:
+        curve = BRepAdaptor_Curve(edge)
+        t0, t1 = curve.FirstParameter(), curve.LastParameter()
+        pts = []
+        for i in range(n + 1):
+            t = t0 + (t1 - t0) * i / n
+            p = curve.Value(t)
+            pts.append((p.X(), p.Y(), p.Z()))
+        return pts
+    except Exception:
+        return _edge_vertex_coords(edge)
+
+
+def _chain_key(p: Tuple[float, float, float]) -> Tuple[float, float, float]:
+    """Coordinate key with loose rounding for endpoint matching."""
+    return (round(p[0], 4), round(p[1], 4), round(p[2], 4))
+
+
+def _chain_loop_points(
+    loop_edges: List[Any],
+    pts_per_edge: int = 0,
+) -> Tuple[List[Tuple[float, float, float]], bool]:
+    """Order a set of edges into a continuous polyline.
+
+    Walks edge-to-edge by matching endpoints, orienting each edge so it
+    starts where the previous one ended. Returns (ordered_points,
+    is_closed). is_closed is True when the walk uses every edge exactly
+    once and returns to its starting point (a single closed loop —
+    the manufacturable parting-line topology).
+    """
+    if not loop_edges:
+        return [], False
+
+    # Adaptive density: loops made of few long edges (e.g. one full-circle
+    # rim) need more points per edge for an accurate shoelace area.
+    if pts_per_edge <= 0:
+        pts_per_edge = max(8, 64 // len(loop_edges))
+
+    polylines = [_edge_polyline(e, pts_per_edge) for e in loop_edges]
+    polylines = [pl for pl in polylines if len(pl) >= 2]
+    if not polylines:
+        return [], False
+
+    # endpoint key -> list of (edge index, end index 0|1)
+    endpoint_map: Dict[Tuple[float, float, float], List[Tuple[int, int]]] = {}
+    for i, pl in enumerate(polylines):
+        for end_idx, p in ((0, pl[0]), (1, pl[-1])):
+            endpoint_map.setdefault(_chain_key(p), []).append((i, end_idx))
+
+    # Start at a degree-1 endpoint if one exists (open chain), else anywhere.
+    start_key = None
+    for key, refs in endpoint_map.items():
+        if len(refs) == 1:
+            start_key = key
+            break
+
+    used = [False] * len(polylines)
+    if start_key is None:
+        first_idx, first_rev = 0, False
+    else:
+        first_idx, end_idx = endpoint_map[start_key][0]
+        first_rev = end_idx == 1  # start from that endpoint
+
+    chain = list(polylines[first_idx][::-1] if first_rev else polylines[first_idx])
+    used[first_idx] = True
+
+    while True:
+        cur_key = _chain_key(chain[-1])
+        next_ref = None
+        for i, end_idx in endpoint_map.get(cur_key, []):
+            if not used[i]:
+                next_ref = (i, end_idx)
+                break
+        if next_ref is None:
+            break
+        i, end_idx = next_ref
+        pl = polylines[i][::-1] if end_idx == 1 else polylines[i]
+        chain.extend(pl[1:])
+        used[i] = True
+
+    is_closed = (
+        all(used)
+        and len(chain) >= 4
+        and _chain_key(chain[0]) == _chain_key(chain[-1])
+    )
+    return chain, is_closed
+
+
 # ---------------------------------------------------------------------------
 # Utility: compute two orthogonal axes perpendicular to pull_dir
 # ---------------------------------------------------------------------------
@@ -115,12 +210,21 @@ def _build_face_side_map(
     faces: List[FaceData],
     pull_dir: Tuple[float, float, float],
 ) -> Dict[int, str]:
-    """Build {hash(TopoDS_Face) -> 'cope' | 'drag'} lookup."""
+    """Build {hash(TopoDS_Face) -> 'cope' | 'drag'} lookup.
+
+    Uses the mold-half assignment from the face classifier (per-sample
+    voting, vertical walls resolved by position) when available; falls
+    back to the single-normal dot product otherwise.
+    """
     face_side: Dict[int, str] = {}
     for f in faces:
         if f.face_shape is not None:
-            d = _dot(f.normal, pull_dir)
-            face_side[hash(f.face_shape)] = "cope" if d >= 0 else "drag"
+            if getattr(f, "mold_half", ""):
+                side = "cope" if f.mold_half == "cavity" else "drag"
+            else:
+                d = _dot(f.normal, pull_dir)
+                side = "cope" if d >= 0 else "drag"
+            face_side[hash(f.face_shape)] = side
     return face_side
 
 
@@ -323,34 +427,46 @@ def _score_loop(
     """
     loop_edges = [all_boundary_edges[i] for i in loop_edge_indices]
 
-    # --- Collect all vertex coords for this loop ---
-    all_coords: List[Tuple[float, float, float]] = []
     total_length = 0.0
     for e in loop_edges:
-        all_coords.extend(_edge_vertex_coords(e))
         total_length += _edge_length(e)
 
-    # 1. Projected enclosed area
-    projected_area = _projected_polygon_area(all_coords, u_axis, v_axis)
+    # --- Chain edges into an ordered polygon (tessellated along curves) ---
+    chain_pts, is_closed = _chain_loop_points(loop_edges)
+
+    # 1. Projected enclosed area — ordered shoelace (valid for non-convex
+    #    rims; angular-sort fallback only if chaining failed).
+    if len(chain_pts) >= 3:
+        pts_2d = [(_dot(p, u_axis), _dot(p, v_axis)) for p in chain_pts]
+        area = 0.0
+        for i in range(len(pts_2d)):
+            j = (i + 1) % len(pts_2d)
+            area += pts_2d[i][0] * pts_2d[j][1] - pts_2d[j][0] * pts_2d[i][1]
+        projected_area = abs(area) / 2.0
+    else:
+        all_coords: List[Tuple[float, float, float]] = []
+        for e in loop_edges:
+            all_coords.extend(_edge_vertex_coords(e))
+        projected_area = _projected_polygon_area(all_coords, u_axis, v_axis)
 
     # 2. Outer boundary confidence
     outer_confidence = projected_area / part_proj_area if part_proj_area > 0 else 0.0
     outer_confidence = min(1.0, outer_confidence)  # clamp
 
     # 3. Moldability contribution — penalize low-draft adjacent faces
-    # Use classification already set on FaceData by face_classifier.py
+    # Use draft attributes already set on FaceData by draft_angle.py
     adjacent_faces = _get_adjacent_faces_for_loop_fast(loop_edge_indices, all_boundary_edges, faces, shape)
     total_adj_area = sum(f.area for f in adjacent_faces) or 1.0
-    warning_adj_area = sum(f.area for f in adjacent_faces if f.draft_angle < 0.5)
+    warning_adj_area = sum(f.area for f in adjacent_faces if f.low_draft)
     moldability = 1.0 - (warning_adj_area / total_adj_area)
 
     # 4. Loop simplicity
     num_edges = len(loop_edges)
     simplicity = 1.0 / (1.0 + math.log2(max(num_edges, 1)))
 
-    # 5. Core/cavity separation quality
-    cope_adj = sum(f.area for f in adjacent_faces if f.classification == "cavity")
-    drag_adj = sum(f.area for f in adjacent_faces if f.classification == "core")
+    # 5. Core/cavity separation quality (mold_half is set for every face)
+    cope_adj = sum(f.area for f in adjacent_faces if (f.mold_half or f.classification) == "cavity")
+    drag_adj = sum(f.area for f in adjacent_faces if (f.mold_half or f.classification) == "core")
     max_adj = max(cope_adj, drag_adj)
     separation_quality = (min(cope_adj, drag_adj) / max_adj) if max_adj > 0 else 0.0
 
@@ -366,6 +482,8 @@ def _score_loop(
         "length_score": length_score,
         "total_length": total_length,
         "num_edges": num_edges,
+        "is_closed": 1.0 if is_closed else 0.0,
+        "chain_pts": chain_pts,
     }
 
 
@@ -422,6 +540,13 @@ WEIGHTS = {
 }
 
 
+# A parting line must be a single CLOSED loop to be manufacturable
+# (judges 2026-07-28: "if the loop is discontinuous it cannot form a
+# surface — it is solid steel"). Open chains keep a token score so they
+# still appear ranked in debug output, but can never beat a closed loop.
+OPEN_LOOP_FACTOR = 0.25
+
+
 def _compute_weighted_score(metrics: Dict[str, float], norm_proj_area: float) -> float:
     """
     Compute the final weighted score [0, 1] for one loop.
@@ -430,7 +555,7 @@ def _compute_weighted_score(metrics: Dict[str, float], norm_proj_area: float) ->
     norm_area = metrics["projected_area"] / norm_proj_area if norm_proj_area > 0 else 0.0
     norm_area = min(1.0, norm_area)
 
-    return (
+    score = (
         WEIGHTS["projected_area"] * norm_area
         + WEIGHTS["outer_confidence"] * metrics["outer_confidence"]
         + WEIGHTS["moldability"] * metrics["moldability"]
@@ -438,6 +563,9 @@ def _compute_weighted_score(metrics: Dict[str, float], norm_proj_area: float) ->
         + WEIGHTS["separation_quality"] * metrics["separation_quality"]
         + WEIGHTS["length_score"] * metrics["length_score"]
     )
+    if not metrics.get("is_closed", 0.0):
+        score *= OPEN_LOOP_FACTOR
+    return score
 
 
 # ---------------------------------------------------------------------------
@@ -457,14 +585,16 @@ class CandidateLoop:
     separation_quality: float                                # [0, 1]
     num_edges: int
     is_selected: bool                                        # True = primary parting line
+    is_closed: bool = True                                   # single continuous closed loop
     vertex_coords: List[Tuple[float, float, float]] = field(default_factory=list)
 
     def __repr__(self) -> str:
         tag = " [PRIMARY]" if self.is_selected else ""
+        closed = "closed" if self.is_closed else "OPEN"
         return (
             f"Loop-{self.candidate_id:02d}{tag}  "
             f"score={self.score:.3f}  area={self.projected_area:.1f}  "
-            f"edges={self.num_edges}  length={self.loop_length:.1f}"
+            f"edges={self.num_edges}  length={self.loop_length:.1f}  {closed}"
         )
 
 
@@ -578,10 +708,11 @@ def find_all_parting_lines(
     candidate_list: List[CandidateLoop] = []
     for cid, (score, group, metrics) in enumerate(scored_loops, start=1):
         loop_edges = [boundary_edges[i] for i in group]
-        # Collect vertex coords for frontend rendering
-        verts: List[Tuple[float, float, float]] = []
-        for e in loop_edges:
-            verts.extend(_edge_vertex_coords(e))
+        # Ordered, tessellated points along the chained loop (frontend render)
+        verts: List[Tuple[float, float, float]] = list(metrics.get("chain_pts") or [])
+        if not verts:
+            for e in loop_edges:
+                verts.extend(_edge_vertex_coords(e))
 
         candidate_list.append(CandidateLoop(
             candidate_id=cid,
@@ -595,6 +726,7 @@ def find_all_parting_lines(
             separation_quality=round(metrics["separation_quality"], 4),
             num_edges=int(metrics["num_edges"]),
             is_selected=False,
+            is_closed=bool(metrics.get("is_closed", 0.0)),
             vertex_coords=verts,
         ))
 

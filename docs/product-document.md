@@ -24,7 +24,7 @@ Every face on the 3D model is analyzed and classified:
 - **Undercut Faces**: Faces that are completely trapped.
 
 ### 4. Parting Line Generation
-The backend extracts the exact boundary edges separating the Core and Cavity faces. These edges are grouped into continuous loops, representing the parting line(s) where the two mold halves will meet. 
+The backend extracts the exact boundary edges separating the Core and Cavity faces, chains them into ordered loops, verifies closure, and selects the **single closed primary parting line** (the manufacturable mold-split boundary), with ranked alternates available for inspection. 
 
 ### 5. Manufacturability Scoring
 A comprehensive score from 0 to 100 is generated based on a weighted penalty formula that considers both the area and the count of undercut and low-draft faces.

@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import axios from 'axios';
-import { UploadCloud, CheckCircle, AlertCircle, Layers, ArrowUp, ArrowDown, ArrowRight, ArrowLeft } from 'lucide-react';
+import { UploadCloud, CheckCircle, AlertCircle, Layers, ArrowUp, ArrowDown, ArrowRight, ArrowLeft, Compass, RotateCcw } from 'lucide-react';
 import ModelViewer from './ModelViewer';
 
 function App() {
@@ -8,30 +8,51 @@ function App() {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [candidates, setCandidates] = useState([]);   // from the auto-search run
+  const [customDir, setCustomDir] = useState('');
   const fileInputRef = useRef(null);
 
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setSelectedFile(file);
-
+  const analyze = async (file, direction = null) => {
     const formData = new FormData();
     formData.append('file', file);
+    if (direction) formData.append('direction', direction.join(','));
 
     setLoading(true);
     setError(null);
-    setData(null);
 
     try {
       const response = await axios.post('/api/analyze', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       setData(response.data);
+      // Keep the ranked candidate list from the automatic search so the
+      // user can compare directions even after overriding.
+      if (!direction) setCandidates(response.data.direction_candidates || []);
     } catch (err) {
-      setError(err.message || 'Failed to analyze part.');
+      setError(err.response?.data?.detail || err.message || 'Failed to analyze part.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setSelectedFile(file);
+    setData(null);
+    setCandidates([]);
+    setCustomDir('');
+    await analyze(file);
+  };
+
+  const handleCustomDirection = async () => {
+    if (!selectedFile) return;
+    const parts = customDir.split(',').map(v => parseFloat(v.trim()));
+    if (parts.length !== 3 || parts.some(isNaN) || parts.every(v => Math.abs(v) < 1e-9)) {
+      setError("Custom direction must be 'x,y,z' with a non-zero vector");
+      return;
+    }
+    await analyze(selectedFile, parts);
   };
 
   const formatDirection = (label) => {
@@ -119,7 +140,7 @@ function App() {
                   {formatDirection(data.best_direction_label)}
                 </div>
                 <div className="metric-subtext">
-                  Max area without undercuts
+                  {data.is_override ? 'Manual override active' : 'Max area without undercuts'}
                 </div>
               </div>
               <div className="metric-card">
@@ -140,6 +161,77 @@ function App() {
                   {data.geometry?.parting_line_is_ambiguous ? '⚠️ Multiple candidates (ambiguous)' : 'Continuous partition loop'}
                 </div>
               </div>
+            </div>
+
+            <div style={{ marginTop: '1rem' }}>
+              <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem', color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Compass size={16} /> Mold Direction
+              </h3>
+              <p style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.75rem' }}>
+                Override the pull direction (e.g., to move flash off cosmetic surfaces).
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {candidates.slice(0, 6).map((c) => {
+                  const isActive = !data.is_override && c.label === data.best_direction_label;
+                  return (
+                    <button
+                      key={c.label}
+                      onClick={() => analyze(selectedFile, c.direction)}
+                      disabled={loading}
+                      style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        padding: '0.4rem 0.6rem', borderRadius: '6px', cursor: 'pointer',
+                        fontSize: '0.8rem',
+                        background: isActive ? 'rgba(59, 130, 246, 0.2)' : 'rgba(255,255,255,0.04)',
+                        border: isActive ? '1px solid #3b82f6' : '1px solid var(--glass-border)',
+                        color: '#e2e8f0',
+                      }}
+                    >
+                      <span>{c.label}{isActive ? ' (auto-best)' : ''}</span>
+                      <span style={{ color: c.undercut_count === 0 && !c.pruned ? '#10b981' : '#f59e0b' }}>
+                        {c.pruned ? '≥' : ''}{c.undercut_count} undercuts
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+                <input
+                  type="text"
+                  value={customDir}
+                  onChange={(e) => setCustomDir(e.target.value)}
+                  placeholder="custom: x,y,z"
+                  style={{
+                    flex: 1, padding: '0.4rem 0.6rem', borderRadius: '6px',
+                    background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)',
+                    color: '#e2e8f0', fontSize: '0.8rem', outline: 'none',
+                  }}
+                />
+                <button
+                  onClick={handleCustomDirection}
+                  disabled={loading || !customDir}
+                  style={{
+                    padding: '0.4rem 0.75rem', borderRadius: '6px', cursor: 'pointer',
+                    background: '#3b82f6', color: 'white', border: 'none', fontSize: '0.8rem', fontWeight: 600,
+                  }}
+                >
+                  Apply
+                </button>
+              </div>
+              {data.is_override && (
+                <button
+                  onClick={() => analyze(selectedFile)}
+                  disabled={loading}
+                  style={{
+                    marginTop: '8px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
+                    padding: '0.4rem', borderRadius: '6px', cursor: 'pointer',
+                    background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)',
+                    color: '#94a3b8', fontSize: '0.8rem',
+                  }}
+                >
+                  <RotateCcw size={14} /> Reset to auto-detected direction
+                </button>
+              )}
             </div>
 
             <div style={{ marginTop: '1rem' }}>

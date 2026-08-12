@@ -300,10 +300,11 @@ function MeshBuilder({ geometry, bboxInfo, moldDirection, showCore, showCavity }
         geo.computeVertexNormals();
 
         const entry = { geo, classification, id: `face-${idx}` };
-        // Swap mapping: backend 'cavity' (dot>=0, normals WITH pull) → frontend CORE group
-        //               backend 'core'   (dot<0,  normals AGAINST pull) → frontend CAVITY group
-        if (classification === 'cavity') { core.push(entry); translated.forEach(v => addVertex(v, 'core')); }
-        else if (classification === 'core') { cavity.push(entry); translated.forEach(v => addVertex(v, 'cavity')); }
+        // Backend mold-half semantics are authoritative:
+        // 'cavity' = external half, retracts along +moldDir
+        // 'core'   = internal half, retracts along -moldDir
+        if (classification === 'cavity') { cavity.push(entry); translated.forEach(v => addVertex(v, 'cavity')); }
+        else if (classification === 'core') { core.push(entry); translated.forEach(v => addVertex(v, 'core')); }
         else { other.push(entry); }
       });
     } else if (geometry.vertices && geometry.faces) {
@@ -323,9 +324,9 @@ function MeshBuilder({ geometry, bboxInfo, moldDirection, showCore, showCavity }
         geo.computeVertexNormals();
 
         const entry = { geo, classification: cls, id: `face-${i}` };
-        // Same swap as above
-        if (cls === 'cavity') { core.push(entry); [p0,p1,p2].forEach(v => addVertex(v, 'core')); }
-        else if (cls === 'core') { cavity.push(entry); [p0,p1,p2].forEach(v => addVertex(v, 'cavity')); }
+        // Same authoritative mapping as above
+        if (cls === 'cavity') { cavity.push(entry); [p0,p1,p2].forEach(v => addVertex(v, 'cavity')); }
+        else if (cls === 'core') { core.push(entry); [p0,p1,p2].forEach(v => addVertex(v, 'core')); }
         else { other.push(entry); }
       }
     }

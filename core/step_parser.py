@@ -134,6 +134,100 @@ def _get_face_area(face) -> float:
     return props.Mass()
 
 
+def _get_face_axis(adaptor: BRepAdaptor_Surface):
+    """Return the axis direction of rotational surfaces (cylinder/cone), else None."""
+    try:
+        stype = adaptor.GetType()
+        if stype == GeomAbs_Cylinder:
+            d = adaptor.Cylinder().Axis().Direction()
+            return (d.X(), d.Y(), d.Z())
+        if stype == GeomAbs_Cone:
+            d = adaptor.Cone().Axis().Direction()
+            return (d.X(), d.Y(), d.Z())
+    except Exception:
+        pass
+    return None
+
+
+# Number of UV samples per direction, by surface type. Curved faces can have
+# normals spanning a wide arc, so a single midpoint normal misrepresents them.
+_SAMPLE_GRID = {
+    "PLANE": 3,       # planes: normal constant, but points matter for raycasting
+    "CYLINDER": 5,
+    "CONE": 5,
+    "SPHERE": 5,
+    "TORUS": 5,
+    "BSPLINE": 5,
+    "BEZIER": 5,
+    "OTHER": 5,
+}
+_MAX_SAMPLES = 15
+
+
+def _sample_face(face, adaptor: BRepAdaptor_Surface, surface_type: str, is_reversed: bool):
+    """
+    Sample points + outward normals across the trimmed interior of a face.
+
+    Returns (sample_points, sample_normals) — parallel lists of 3D tuples.
+    Only UV points classified as inside the trimmed face are kept.
+    """
+    u_min = max(adaptor.FirstUParameter(), -1e6)
+    u_max = min(adaptor.LastUParameter(), 1e6)
+    v_min = max(adaptor.FirstVParameter(), -1e6)
+    v_max = min(adaptor.LastVParameter(), 1e6)
+
+    n = _SAMPLE_GRID.get(surface_type, 5)
+    geom_surface = BRep_Tool.Surface_s(face)
+    classifier = BRepClass_FaceClassifier()
+
+    points: List[Tuple[float, float, float]] = []
+    normals: List[Tuple[float, float, float]] = []
+
+    def try_uv(u: float, v: float) -> bool:
+        classifier.Perform(face, gp_Pnt2d(u, v), 1e-6)
+        if classifier.State() != TopAbs_IN:
+            return False
+        props = GeomLProp_SLProps(geom_surface, u, v, 1, 1e-6)
+        if not props.IsNormalDefined():
+            return False
+        nrm = props.Normal()
+        pnt = props.Value()
+        nv = (nrm.X(), nrm.Y(), nrm.Z())
+        if is_reversed:
+            nv = (-nv[0], -nv[1], -nv[2])
+        nv = _normalize(nv)
+        if nv == (0.0, 0.0, 0.0):
+            return False
+        points.append((pnt.X(), pnt.Y(), pnt.Z()))
+        normals.append(nv)
+        return True
+
+    # Interior grid (avoid exact boundaries where normals can be singular)
+    for i in range(n):
+        u = u_min + (u_max - u_min) * (i + 0.5) / n
+        for j in range(n):
+            v = v_min + (v_max - v_min) * (j + 0.5) / n
+            if len(points) >= _MAX_SAMPLES:
+                break
+            try_uv(u, v)
+        if len(points) >= _MAX_SAMPLES:
+            break
+
+    # Fallback: denser scan if the coarse grid found nothing (thin/holed faces)
+    if not points:
+        dense = 12
+        for i in range(1, dense):
+            u = u_min + (u_max - u_min) * i / dense
+            for j in range(1, dense):
+                v = v_min + (v_max - v_min) * j / dense
+                if try_uv(u, v):
+                    break
+            if points:
+                break
+
+    return points, normals
+
+
 def _get_surface_type_label(adaptor: BRepAdaptor_Surface) -> str:
     """Map OCP surface type enum to a human-readable string."""
     stype = adaptor.GetType()
@@ -185,6 +279,15 @@ def parse_step(filepath: str) -> Tuple[List[FaceData], Any]:
         area = _get_face_area(topo_face)
         surface_type = _get_surface_type_label(adaptor)
 
+        # Multi-point sampling across the trimmed face interior
+        sample_points, sample_normals = _sample_face(
+            topo_face, adaptor, surface_type, is_reversed
+        )
+        if not sample_points:
+            # Guarantee at least one sample (the representative midpoint)
+            sample_points = [center]
+            sample_normals = [normal]
+
         face_data = FaceData(
             face_id=face_id,
             face_shape=topo_face,
@@ -192,6 +295,9 @@ def parse_step(filepath: str) -> Tuple[List[FaceData], Any]:
             normal=normal,
             area=area,
             surface_type=surface_type,
+            sample_points=sample_points,
+            sample_normals=sample_normals,
+            axis=_get_face_axis(adaptor),
         )
         faces.append(face_data)
 
