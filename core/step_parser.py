@@ -162,6 +162,9 @@ _SAMPLE_GRID = {
     "OTHER": 5,
 }
 _MAX_SAMPLES = 15
+# Below this, a face's undercut verdict is effectively a single-ray decision,
+# so the sampler retries on a denser UV grid before giving up.
+_MIN_SAMPLES = 4
 
 
 def _sample_face(face, adaptor: BRepAdaptor_Surface, surface_type: str, is_reversed: bool):
@@ -213,16 +216,26 @@ def _sample_face(face, adaptor: BRepAdaptor_Surface, surface_type: str, is_rever
         if len(points) >= _MAX_SAMPLES:
             break
 
-    # Fallback: denser scan if the coarse grid found nothing (thin/holed faces)
-    if not points:
+    # Fallback: denser scan when the coarse grid found TOO FEW points, not just
+    # when it found none. A heavily trimmed face (an L-shaped or annular region
+    # carved out of a large parametric plane) can put 8 of 9 coarse samples
+    # outside the trim while still leaving plenty of valid interior. The old
+    # `if not points` guard let such a face keep a single sample, and a single
+    # sample means a single-ray undercut verdict — the Phase 1 defect this
+    # sampler exists to prevent. Collect across the whole dense grid rather
+    # than stopping at the first hit.
+    if len(points) < _MIN_SAMPLES:
+        points.clear()
+        normals.clear()
         dense = 12
         for i in range(1, dense):
             u = u_min + (u_max - u_min) * i / dense
             for j in range(1, dense):
                 v = v_min + (v_max - v_min) * j / dense
-                if try_uv(u, v):
+                if len(points) >= _MAX_SAMPLES:
                     break
-            if points:
+                try_uv(u, v)
+            if len(points) >= _MAX_SAMPLES:
                 break
 
     return points, normals

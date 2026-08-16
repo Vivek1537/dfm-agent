@@ -36,10 +36,17 @@ def classify_faces(
     faces: List[FaceData],
     mold_direction: Tuple[float, float, float],
     raycaster: Optional[UndercutRaycaster] = None,
+    tie_half: str = "cavity",
 ) -> List[FaceData]:
     """
     Assign mold_half + classification to every face.
     Requires is_undercut (raycaster) and draft_angle/low_draft (draft step).
+
+    `tie_half` decides the faces both halves can reach (see `tied_faces`).
+    Reachability leaves these genuinely free, so this is not a heuristic gap
+    to be filled with a better guess — it is the degree of freedom the mould
+    designer actually exercises, and the literature resolves it by optimising
+    parting-line flatness rather than by a fixed default.
     """
     # Area-weighted part centroid — fallback tie-break for vertical walls
     total_area = sum(f.area for f in faces) or 1.0
@@ -69,12 +76,104 @@ def classify_faces(
             face.mold_half = "core"
         else:
             face.mold_half = _vertical_wall_half(
-                face, pull, neg_pull, raycaster, (cx, cy, cz)
+                face, pull, neg_pull, raycaster, (cx, cy, cz), tie_half
             )
 
         face.classification = "undercut" if face.is_undercut else face.mold_half
 
+    _orient_halves(faces, raycaster)
+
     return faces
+
+
+def tied_faces(
+    faces: List[FaceData],
+    mold_direction: Tuple[float, float, float],
+    raycaster: Optional[UndercutRaycaster],
+) -> List[FaceData]:
+    """Faces both mold halves can reach, and which are not internal.
+
+    These are the ones `_vertical_wall_half` resolves with `tie_half`. Every
+    other face is pinned by reachability, so this list is the whole of the
+    split's freedom: on Part1 it is 8 faces (four skirt walls plus four
+    corner rounds, 751.6 mm²), and assigning them to the core rather than the
+    cavity is the entire difference between a flat rim at the top and a loop
+    meandering around the snap-tab windows.
+    """
+    if raycaster is None:
+        return []
+
+    pull = mold_direction
+    neg_pull = (-pull[0], -pull[1], -pull[2])
+    out: List[FaceData] = []
+    for face in faces:
+        normals = face.sample_normals or [face.normal]
+        w = face.area / len(normals) if normals else 0.0
+        cavity_w = sum(w for nv in normals if _dot(nv, pull) > _PERP_EPS)
+        core_w = sum(w for nv in normals if _dot(nv, pull) < -_PERP_EPS)
+        if cavity_w != core_w:
+            continue                      # decided by normal vote, not tied
+        pts = face.sample_points or [face.center]
+        n = min(len(pts), len(normals))
+        if not n:
+            continue
+        reachable_both = all(
+            not raycaster.is_blocked(pts[i], normals[i], d)
+            for i in range(n) for d in (pull, neg_pull)
+        )
+        internal = sum(
+            1 for i in range(n)
+            if raycaster.is_blocked(pts[i], normals[i], normals[i])
+        )
+        if reachable_both and internal <= n / 2:
+            out.append(face)
+    return out
+
+
+def _orient_halves(
+    faces: List[FaceData],
+    raycaster: Optional[UndercutRaycaster],
+) -> None:
+    """Name the half that forms the part's internal surfaces "core".
+
+    Which faces group together is a geometric fact; which group is *called*
+    core is a naming convention, and Bosch state it plainly: "even the
+    internal surface will be formed by the core". Deriving the name from the
+    pull sign instead conflates the two, so flipping the sign silently
+    renamed a correct partition into a wrong one. Decide the partition on
+    geometry, then fix the polarity here.
+
+    No-op when the probe is unavailable or finds no internal surface at all
+    (a solid boss has none), leaving the normal-vote naming untouched.
+    """
+    if raycaster is None:
+        return
+
+    internal_area = {"core": 0.0, "cavity": 0.0}
+    for face in faces:
+        pts = face.sample_points or [face.center]
+        nrms = face.sample_normals or [face.normal]
+        n = min(len(pts), len(nrms))
+        if not n:
+            continue
+        # A sample whose own outward normal runs back into material across a
+        # void is looking at the far side of an internal feature.
+        hits = sum(
+            1 for i in range(n)
+            if raycaster.is_blocked(pts[i], nrms[i], nrms[i])
+        )
+        if hits > n / 2 and face.mold_half in internal_area:
+            internal_area[face.mold_half] += face.area
+
+    if internal_area["cavity"] > internal_area["core"]:
+        for face in faces:
+            if face.mold_half == "core":
+                face.mold_half = "cavity"
+            elif face.mold_half == "cavity":
+                face.mold_half = "core"
+            face.classification = (
+                "undercut" if face.is_undercut else face.mold_half
+            )
 
 
 def _vertical_wall_half(
@@ -83,6 +182,7 @@ def _vertical_wall_half(
     neg_pull: Tuple[float, float, float],
     raycaster: Optional[UndercutRaycaster],
     centroid: Tuple[float, float, float],
+    tie_half: str = "cavity",
 ) -> str:
     """Mold half that PHYSICALLY forms a fully vertical wall.
 
@@ -116,10 +216,10 @@ def _vertical_wall_half(
             # Through-holes / internal channels: formed by a core pin
             # (judges' cap example: internal surfaces → core).
             return "core"
-        # External wall reachable from both halves: the cavity forms the
-        # part's exterior (cosmetic) skin — parting line sits at the open
-        # lip, so the whole outer wall belongs to the cavity steel.
-        return "cavity"
+        # Reachable from both halves and not internal: the free set. Neither
+        # assignment is more physical, so the caller decides — see `tied_faces`
+        # and the parting-line optimisation that consumes it.
+        return tie_half
 
     # No raycaster: which side of the centroid it sits on
     rel = (face.center[0] - centroid[0],
@@ -145,6 +245,11 @@ def build_analysis_result(
         cavity_face_count=sum(1 for f in faces if f.classification == "cavity"),
         undercut_face_count=sum(1 for f in faces if f.classification == "undercut"),
         warning_face_count=sum(1 for f in faces if f.low_draft and not f.is_undercut),
+        core_area=sum(f.area for f in faces if f.classification == "core"),
+        cavity_area=sum(f.area for f in faces if f.classification == "cavity"),
+        undercut_area=sum(f.area for f in faces if f.classification == "undercut"),
+        warning_area=sum(f.area for f in faces if f.low_draft and not f.is_undercut),
+        total_area=sum(f.area for f in faces),
         manufacturability_score=compute_score(faces),
     )
 

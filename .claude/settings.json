@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(time curl -s -X POST http://127.0.0.1:8000/analyze -F \"file=@assets/Part1.stp\" -o /tmp/claude-1000/-home-vivek-dfm-agent/7083dfbb-c595-45da-bf01-ed2866362c4f/scratchpad/part1_result.json)",
+      "Bash(python3 -c ' *)"
+    ]
+  }
+}

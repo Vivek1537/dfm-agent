@@ -56,7 +56,7 @@ class CanvasErrorBoundary extends React.Component {
               cursor: 'pointer',
               fontWeight: 600,
               boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)',
-              transition: 'all 0.2s'
+              transition: 'background 0.2s ease, box-shadow 0.2s ease'
             }}
           >
             Retry Render
@@ -991,7 +991,7 @@ export default function ModelViewer({ geometry }) {
             fontFamily: 'Inter, sans-serif',
             fontSize: '0.825rem',
             fontWeight: 600,
-            transition: 'all 0.2s',
+            transition: 'background 0.2s ease, color 0.2s ease, border-color 0.2s ease',
             background: showPlanes ? '#6366F1' : '#ffffff',
             color: showPlanes ? '#ffffff' : '#111827',
             border: showPlanes ? 'none' : '1px solid #D1D5DB',
@@ -1016,7 +1016,7 @@ export default function ModelViewer({ geometry }) {
             fontFamily: 'Inter, sans-serif',
             fontSize: '0.825rem',
             fontWeight: 600,
-            transition: 'all 0.2s',
+            transition: 'background 0.2s ease, color 0.2s ease, border-color 0.2s ease',
             background: (showCore && showCavity) ? '#111827' : '#ffffff',
             color: (showCore && showCavity) ? '#ffffff' : '#111827',
             border: (showCore && showCavity) ? 'none' : '1px solid #D1D5DB',
@@ -1042,7 +1042,7 @@ export default function ModelViewer({ geometry }) {
             fontFamily: 'Inter, sans-serif',
             fontSize: '0.825rem',
             fontWeight: 600,
-            transition: 'all 0.2s',
+            transition: 'background 0.2s ease, color 0.2s ease, border-color 0.2s ease',
             background: showCore ? '#1D4ED8' : '#ffffff',
             color: showCore ? '#ffffff' : '#111827',
             border: showCore ? 'none' : '1px solid #D1D5DB',
@@ -1068,7 +1068,7 @@ export default function ModelViewer({ geometry }) {
             fontFamily: 'Inter, sans-serif',
             fontSize: '0.825rem',
             fontWeight: 600,
-            transition: 'all 0.2s',
+            transition: 'background 0.2s ease, color 0.2s ease, border-color 0.2s ease',
             background: showCavity ? '#15803D' : '#ffffff',
             color: showCavity ? '#ffffff' : '#111827',
             border: showCavity ? 'none' : '1px solid #D1D5DB',
