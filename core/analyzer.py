@@ -76,7 +76,7 @@ def analyze_part(
     # and the closed-end split is degenerate (12% of area in one half). The
     # open end -- where the core enters -- is where the line belongs, and the
     # default already lands there.
-    classify_faces(faces, direction_to_use, raycaster)
+    classify_faces(faces, direction_to_use, raycaster, shape=shape)
 
     # 5. Extract Parting Line
     pl_edges = find_parting_line(shape, faces, direction_to_use)
