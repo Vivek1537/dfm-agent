@@ -157,8 +157,18 @@ Every face gets `mold_half` (which half **forms** it) and `classification`
 3. **Through-holes / internal channels** (reachable from both halves but
    facing part material across a void): assigned to the **core** (core-pin
    convention, matching the judges' cap example).
-4. External walls reachable from both halves default to the **cavity** (the
-   cavity wraps the cosmetic exterior; the parting line sits at the rim).
+4. **External walls reachable from BOTH halves** are genuinely ambiguous —
+   physics does not decide them, and either assignment yields a
+   manufacturable mold. They are deferred, grouped into connected
+   **regions**, and each region is assigned by the **shared edge length** it
+   has with already-decided faces (`_resolve_ambiguous_regions`). Taking the
+   side with the greater shared length yields the shorter core↔cavity
+   interface — the mold-design principle of keeping the split on the
+   shortest closed boundary. Edge length is the weight because it is exactly
+   the parting line produced; face area never appears in the boundary.
+   Undercut faces are excluded from voting (a side action releases them, so
+   they must not steer the main parting line). A region with no decided
+   neighbour, or an exact tie, falls back to the cavity.
 
 Draft (`core/draft_angle.py`) is orthogonal: worst-case draft angle per face
 = min over samples of `asin(|n·d|)`; faces under 1° are flagged as warnings
@@ -214,11 +224,25 @@ Reference results (WSL2, single core, includes STEP parse):
 
 | Part | Faces | Best pull | Undercuts | Core/Cavity | Primary PL | Time |
 |---|---|---|---|---|---|---|
-| Part 1 (Phase 1 cap) | 311 | Z+ | **0** (= judges' answer) | 261 / 50 | closed rim, 32 edges | ~2 s |
-| Part 2 / Part3.stp (Phase 2) | 414 | Z− | 88 (genuine side-action clips) | 322 / 4 | closed outer rim 36×36 @ z=1 | ~14 s |
-| GrabCAD cup holder | 56 | Z− | 8 (snap-clip clusters) | 42 / 6 | closed rim 101×100 | ~1 s |
-| Synthetic cup (ø60×80, 3 mm wall) | 5 | Z− | 0 | inner=core, outer=cavity | rim, area err 0.16 % | <0.1 s |
+| Part 1 (Phase 1 cap) | 311 | Z+ | **0** (= judges' answer) | 269 / 42 | **planar** closed rim, 8 edges @ z=15 | ~6 s |
+| Part 3 (Phase 2) | 414 | Z− | 88 (side-action clips) | 322 / 4 | planar closed circle ø36 @ z=4 | ~25 s |
+| GrabCAD cup holder | 56 | Z− | 8 (snap-clip clusters) | 42 / 6 | closed loop, 24 edges, z 69.8–84.2 | ~3 s |
+| Synthetic cup (ø60×80, 3 mm wall) | 5 | Z− | 0 | inner=core, outer=cavity | planar rim | <0.1 s |
 | Synthetic cap + lateral hole | 7 | Z− | exactly the 2 hole walls | correct | closed rim | <0.1 s |
 
+**External validation against a built mould.** `sidecore/` (GrabCAD) ships the
+Cavity Plate and Core Plate alongside the parts they produce. The plates meet
+at **z = 0**, and the engine independently puts PLASTIC BUSH's parting line at
+**z = 0.00** and Coupler's at z = 1.00 (inside the plate overlap; the Core
+Plate tops at +0.51). PLASTIC BUSH is also flagged with 2 undercut regions,
+and the real mould uses a Slide Core. PLASTIC SLEEVE is the weakest result at
+z = 2.03, about 2 mm high. These files are large third-party downloads and are
+not tracked in the repo.
+
 Synthetic parts are generated with known ground truth (cadquery) and asserted
-in a 9-point regression suite that gates every algorithm change.
+in a **29-test** suite that gates every algorithm change: 24 in
+`tests/test_synthetic.py` (construction-known answers) plus 5 in
+`tests/test_parting_line_topology.py`, which assert the primary loop is a
+single closed **planar** loop. The planarity assertion exists because its
+absence let Part 1's parting line regress from a flat rim to a meandering
+loop across three commits without any test failing.

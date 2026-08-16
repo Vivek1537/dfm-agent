@@ -119,7 +119,7 @@ is ZERO undercuts.**
 Source: our transcription of `WhatsApp Video 2026-07-21 at 7.51.19 PM.mp4`.
 
 - The Phase 1 part is a **packaging cap**; the optimal solution (pull along
-  Z, parting line at the bottom outer rim) has **no undercuts**: “Even the
+  Z, parting line at a single flat rim) has **no undercuts**: “Even the
   internal surface and everywhere, it will be formed by the core. And then it
   releases and there are no undercuts.” ← Source for our **internal
   surfaces → core** convention.
@@ -722,7 +722,8 @@ usually easier to fix than twenty small ones.
 | v2 P0 rewrite (07-27): multi-sampling, axis sweep, mold_half voting | Z−, 4 uc, 62/245, 7 loops, 6.3 s | Z+, 88 uc, 22/304, 8 loops, 28.2 s |
 | + transition filter (07-27) | Z−, **0 uc = judges' answer**, 64/247, score 88.0 | Z+, 88 uc (all genuine), 22/304 |
 | + PL chaining + area ranking (07-29) | primary rim closed, area corrected | primary = TRUE outer rim (z=4, ~1016 mm²) vs old lug loop |
-| + reachability + sign fix + pruning (07-30, current) | **Z+, 0 uc, 261 core / 50 cavity, 1 closed PL loop (32 edges), 2.1 s** | **Z−, 88 uc, 322 core / 4 cavity, closed square rim 36×36 @ z=1, 14.3 s** |
+| + reachability + sign fix + pruning (07-30) | Z+, 0 uc, 261 core / 50 cavity, 1 closed PL loop (**32 edges, non-planar, z 3–10**), 2.1 s | Z−, 88 uc, 322 core / 4 cavity, closed circle ø36 @ z=4, 14.3 s |
+| + ambiguous-region resolution (08-17, current) | **Z+, 0 uc, 269 core / 42 cavity, 1 closed PLANAR rim (8 edges) @ z=15, ~6 s** | **Z−, 88 uc, 322 core / 4 cavity, closed planar circle ø36 @ z=4, ~25 s** |
 
 Part 3's 88 undercuts are GENUINE side-action features: two symmetric
 snap-leg/lug clusters at z≈12–22 with normals ≈ ±(0.77, 0.64, 0) — exactly
@@ -742,10 +743,13 @@ the kind of feature the judges' nozzle example says needs a side core.
   within **0.16 %** of exact π r².
 - **Synthetic cap with lateral hole** (ø50 × 30 mm, ø8 side hole): exactly
   the 2 hole-wall half-cylinders flagged as undercuts; rim loop correct.
-- These are encoded in a **9-assertion regression suite** (inline script,
-  see session notes) that gates every algorithm change: Part1 pull=Z+ /
-  pockets=core / 0 uc; Part3 pull=Z− / bore=core / 88 uc; cupholder 8 uc;
-  cup halves correct; sidehole 2 uc. Current status: **9/9 PASS**.
+- These are encoded in a **29-test suite** under `tests/` that gates every
+  algorithm change: `test_synthetic.py` (24 tests over cadquery parts with
+  construction-known answers) and `test_parting_line_topology.py` (5 tests
+  asserting the primary loop is a single closed **planar** loop). Current
+  status: **29/29 PASS**. An earlier inline 9-assertion script referenced
+  here no longer exists — it was deleted in commit 719320d and never
+  replaced until this suite.
 
 ### 8.3 Performance profile (Part 3, WSL2 single core)
 parse 1.1 s · raycaster build 0.0 s · winning axis eval ~4 s · losing axes
