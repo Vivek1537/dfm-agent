@@ -219,3 +219,6 @@ __marimo__/
 
 # macOS artifacts
 .DS_Store
+
+# local Claude Code config
+.claude/
