@@ -30,7 +30,7 @@
 | :--- | :--- |
 | **Parse STEP & Evaluate Pull Direction** | Loads `.stp` files and automatically calculates the mathematically optimal mold pull direction. |
 | **Surface Normal & Draft Angle Analysis** | Classifies faces into Core, Cavity, Undercut, and Warning categories with draft angle evaluation against the resolved mold-pull direction. |
-| **Propose Core–Cavity Split** | Generates highly accurate 3D parting line loops to define the core and cavity separation. |
+| **Propose Core–Cavity Split** | Derives the main parting line as the closed loop where core-assigned and cavity-assigned surfaces meet, and ranks alternate candidate loops. |
 | **Clear 3D Visualization** | A rich React + Three.js frontend to visualize analysis results directly in your browser. |
 
 <br />
@@ -131,8 +131,44 @@ This cleanly shuts down both servers, including all of their child processes. If
 
 ## Inputs & Outputs
 
-- **Input:** industry-standard CAD files (`.stp` / `.step`). A sample part is included in `assets/`.
+- **Input:** industry-standard CAD files (`.stp` / `.step`). Two reference parts are included in `assets/` (`Part1.stp`, `Part3.stp`).
 - **Output:** an interactive browser-based 3D evaluation — manufacturability score, face classification, best pull direction (with manual override), and parting lines.
+
+<br />
+
+## Running the Tests
+
+```bash
+.venv/bin/python -m pytest tests/ -q
+```
+
+29 tests, no network or GPU needed, about 90 seconds:
+
+- `tests/test_synthetic.py` — 24 tests over parts built with cadquery, so the
+  correct answer is known by construction (a cup's bore must belong to the
+  core, a radial hole must be the only undercut under an axial pull, and so on).
+- `tests/test_parting_line_topology.py` — 5 tests asserting the primary parting
+  line is a single **closed, planar** loop.
+
+<br />
+
+## Validation
+
+Measured on the reference parts:
+
+| Part | Pull | Undercuts | Primary parting line |
+| :--- | :--- | :--- | :--- |
+| Part 1 (Phase 1 cap) | Z+ | 0 | planar closed rim, 8 edges @ z=15 |
+| Part 3 (Phase 2) | Z− | 88 | planar closed circle ø36 @ z=4 |
+| GrabCAD cup holder | Z− | 8 | closed loop, 24 edges |
+
+**Checked against a mould that was actually built.** A public GrabCAD
+side-core mould ships its Cavity Plate and Core Plate alongside the parts they
+produce. The plates meet at **z = 0**, and the engine independently places
+PLASTIC BUSH's parting line at **z = 0.00** and flags 2 undercut regions — the
+real mould uses a slide core. Coupler lands at z = 1.00, inside the plate
+overlap. PLASTIC SLEEVE is the weakest case at z = 2.03, roughly 2 mm high.
+Those files are large third-party downloads and are not tracked here.
 
 <br />
 
@@ -143,7 +179,7 @@ dfm-agent/
 ├── api.py           # FastAPI application entry point
 ├── core/            # DfM logic (parting lines, surface classification)
 ├── frontend/        # React/Vite UI & Three.js viewer
-├── tests/           # Backend unit tests
+├── tests/           # 29 tests: synthetic ground truth + parting-line topology
 ├── app.sh           # One-click start for macOS / Linux
 ├── stop.sh          # One-click stop for macOS / Linux
 ├── app.bat          # One-click start for Windows (double-click this)
