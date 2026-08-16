@@ -69,13 +69,6 @@ def analyze_part(
     compute_draft_angles(faces, direction_to_use)
 
     # 4. Assign mold halves + classify (core, cavity, undercut)
-    #
-    # The tied faces keep the default `tie_half="cavity"`. Resolving them by
-    # parting-line score was tried and measured wrong: on both cup fixtures
-    # the scorer preferred the closed end (0.763) over the open end (0.713),
-    # and the closed-end split is degenerate (12% of area in one half). The
-    # open end -- where the core enters -- is where the line belongs, and the
-    # default already lands there.
     classify_faces(faces, direction_to_use, raycaster, shape=shape)
 
     # 5. Extract Parting Line

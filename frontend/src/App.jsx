@@ -101,7 +101,7 @@ function App() {
     else if (label.includes('X-')) Icon = <ArrowLeft size={16} />;
     else if (label.includes('Y+')) Icon = <ArrowUp size={16} style={{transform: 'rotate(45deg)'}} />;
     else if (label.includes('Y-')) Icon = <ArrowDown size={16} style={{transform: 'rotate(45deg)'}} />;
-    
+
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
         {label.split(' ')[0]} axis {Icon}
