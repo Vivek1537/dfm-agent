@@ -359,6 +359,58 @@ def part3_pockets_filled():
     return _export(name, filled), expected
 
 
+# ------------------------------------------------- P12 nozzle (mentor's sketch)
+def oring_nozzle(r_out: float = 20.0, groove_r: float = 14.0,
+                 r_bore: float = 8.0, h: float = 40.0,
+                 gz0: float = 15.0, gz1: float = 25.0):
+    """The nozzle Bosch drew on the Phase 1 review call, with a stated answer.
+
+    Reconstructed from the NX sequence in the recording: revolve about the
+    vertical axis, cut a circumferential groove around the waist (the O-ring
+    seat), bore through the middle for the fluid.
+
+    This is the only fixture whose answer comes from the customer rather than
+    from our own construction. His words:
+
+      "This and these features will become undercut ... if you take Z-axis as
+       the molding direction. So we give Y-axis as the molding direction ...
+       Parting plane will be this plane. It splits the two halves, and then
+       there will be a side core ... the internal wall will be formed by a
+       side core."
+
+    So the expected answer is a pull PERPENDICULAR to the part's own axis, a
+    parting plane CONTAINING that axis (the clamshell split), and an axial
+    side core for the bore. X and Y are interchangeable here because the part
+    is axisymmetric.
+
+    The groove is the crux: a 360 degree external recess cannot be released by
+    an axial draw at any parting-line height, so no choice of parting line
+    rescues a Z pull.
+    """
+    solid = cq.Workplane("XY").circle(r_out).extrude(h)
+    solid = solid.cut(
+        cq.Workplane("XY").workplane(offset=gz0)
+        .circle(r_out + 1.0).circle(groove_r)
+        .extrude(gz1 - gz0)
+    )
+    solid = solid.cut(cq.Workplane("XY").circle(r_bore).extrude(h))
+
+    expected = {
+        "name": "oring_nozzle",
+        "part_axis": (0.0, 0.0, 1.0),
+        "r_outer": r_out,
+        "r_groove": groove_r,
+        "r_bore": r_bore,
+        "height": h,
+        "groove_z": (gz0, gz1),
+        # Pull must be perpendicular to the part axis, not along it.
+        "pull_is_perpendicular_to_axis": True,
+        # The bore is formed by a core running along the part axis.
+        "side_action_along_axis": True,
+    }
+    return _export("p12_oring_nozzle", solid), expected
+
+
 ALL_PARTS = [
     solid_cylinder,
     open_cup,
@@ -370,4 +422,5 @@ ALL_PARTS = [
     plain_boss,
     capped_cup,
     cylinder_blind_pocket,
+    oring_nozzle,
 ]

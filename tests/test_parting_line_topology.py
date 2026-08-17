@@ -145,3 +145,106 @@ def test_synthetic_cup_outer_wall_stays_cavity():
     assert outer_wall.mold_half == "cavity", "convex outer wall must be cavity"
     assert inner_wall.mold_half == "core", "concave inner wall must be core"
     assert result.undercut_face_count == 0
+
+
+# --------------------------------------------------------------- area totals
+def test_area_fields_are_populated_and_consistent():
+    """Areas must be reported, and must agree with the face counts.
+
+    The five area fields existed on AnalysisResult but nothing filled them, so
+    /analyze returned {"core": 0.0, "cavity": 0.0, "total": 0.0} and the UI's
+    area-led bars rendered from zeros while the counts looked fine. Assert the
+    totals are non-zero and that every class with faces also has area, which is
+    what a silent regression would break.
+    """
+
+    res = analyze_part(PART1, "Part1")
+
+    assert res.total_area > 0.0, "total_area is zero — areas are not populated"
+    assert abs(res.total_area - sum(f.area for f in res.faces)) < 1e-6
+
+    parts = res.core_area + res.cavity_area + res.undercut_area
+    assert abs(parts - res.total_area) < 1e-3, (
+        f"core+cavity+undercut ({parts:.3f}) must cover the whole surface "
+        f"({res.total_area:.3f}); the three classifications are exhaustive"
+    )
+
+    for count, area, label in (
+        (res.core_face_count, res.core_area, "core"),
+        (res.cavity_face_count, res.cavity_area, "cavity"),
+        (res.undercut_face_count, res.undercut_area, "undercut"),
+        (res.warning_face_count, res.warning_area, "warning"),
+    ):
+        assert (count > 0) == (area > 0.0), (
+            f"{label}: {count} faces but {area} mm² — counts and areas disagree"
+        )
+
+
+# ---------------------------------------------------- P12 nozzle (customer answer)
+#
+# The only fixture whose expected answer comes from Bosch rather than from our
+# own construction: on the Phase 1 review call the reviewer drew this nozzle and
+# stated that an axial (Z) pull traps the O-ring groove, so the pull is taken
+# perpendicular to the part axis, the parting plane contains that axis, and a
+# side core forms the bore.
+
+def _nozzle():
+    from tests import synthetic_parts as sp
+    return sp.oring_nozzle()
+
+
+def test_nozzle_pull_is_perpendicular_to_the_part_axis():
+    """An axial draw cannot release a 360° external groove, at any PL height."""
+    path, exp = _nozzle()
+    res = analyze_part(path, "oring_nozzle")
+
+    axis = exp["part_axis"]
+    along = abs(sum(a * b for a, b in zip(res.best_mold_direction, axis)))
+    assert along < 0.1, (
+        f"pull {res.best_mold_direction} runs along the part axis {axis}; the "
+        f"circumferential groove makes that a trapped draw — the reviewer's "
+        f"answer is a perpendicular pull"
+    )
+
+
+def test_nozzle_bore_is_released_by_an_axial_side_core():
+    """"the internal wall will be formed by a side core" — and it runs axially."""
+    path, exp = _nozzle()
+    res = analyze_part(path, "oring_nozzle")
+
+    assert res.undercut_regions, "no side action proposed for the bore"
+    axis = exp["part_axis"]
+    for region in res.undercut_regions:
+        direction = region.to_dict().get("side_action_direction")
+        assert direction, "region carries no side-action direction"
+        along = abs(sum(a * b for a, b in zip(direction, axis)))
+        assert along > 0.9, (
+            f"side core pulls {direction}; the bore is released along the part "
+            f"axis {axis}"
+        )
+
+
+@pytest.mark.xfail(
+    reason="parting line is derived correctly only when the pull is roughly "
+           "along the part's dominant axis. For a perpendicular pull the loop "
+           "must lie in a plane CONTAINING the axis (the clamshell split the "
+           "reviewer drew); we currently return a circle perpendicular to it, "
+           "which cannot separate the two halves.",
+    strict=True,
+)
+def test_nozzle_parting_line_contains_the_part_axis():
+    """The clamshell split: the loop must span the part along its own axis."""
+    path, exp = _nozzle()
+    res = analyze_part(path, "oring_nozzle")
+    loop = compute_parting_line_result(
+        res.raw_shape, res.faces, res.best_mold_direction
+    ).primary_loop
+
+    points = _loop_points(loop)
+    axis = exp["part_axis"]
+    spread = _spread_along(points, axis)
+    assert spread > exp["height"] * 0.5, (
+        f"loop spans only {spread:.1f} mm along the part axis but the part is "
+        f"{exp['height']} mm tall — the loop lies across the axis instead of "
+        f"containing it, so it cannot part the two halves"
+    )
