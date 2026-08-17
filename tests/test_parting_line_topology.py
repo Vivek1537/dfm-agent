@@ -224,16 +224,14 @@ def test_nozzle_bore_is_released_by_an_axial_side_core():
         )
 
 
-@pytest.mark.xfail(
-    reason="parting line is derived correctly only when the pull is roughly "
-           "along the part's dominant axis. For a perpendicular pull the loop "
-           "must lie in a plane CONTAINING the axis (the clamshell split the "
-           "reviewer drew); we currently return a circle perpendicular to it, "
-           "which cannot separate the two halves.",
-    strict=True,
-)
 def test_nozzle_parting_line_contains_the_part_axis():
-    """The clamshell split: the loop must span the part along its own axis."""
+    """The clamshell split: the loop must span the part along its own axis.
+
+    Was an xfail until faces crossing the silhouette were subdivided
+    (`core/silhouette.py`). Without that split a whole cylinder is handed to
+    one mould half, which pins the boundary to the horizontal faces and yields
+    a circle ACROSS the axis instead of the loop containing it.
+    """
     path, exp = _nozzle()
     res = analyze_part(path, "oring_nozzle")
     loop = compute_parting_line_result(

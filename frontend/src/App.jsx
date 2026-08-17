@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import axios from 'axios';
-import { UploadCloud, CheckCircle, AlertCircle, Layers, ArrowUp, ArrowDown, ArrowRight, ArrowLeft, Compass, RotateCcw } from 'lucide-react';
+import { UploadCloud, CheckCircle, AlertCircle, Layers, ArrowUp, ArrowDown, ArrowRight, ArrowLeft, Compass, RotateCcw, Wrench } from 'lucide-react';
 import ModelViewer from './ModelViewer';
 
 function App() {
@@ -353,6 +353,74 @@ function App() {
                 </div>
               </div>
             </div>
+
+            {/* Side cores & lifters. A face count is a topology artifact --
+                the tooling decision is made per connected region, so this
+                panel reports regions and the mechanism each one needs. */}
+            {data.undercut_regions?.length > 0 && (
+              <div style={{ marginTop: '1rem' }}>
+                <h3 style={{ fontSize: '1rem', marginBottom: '0.25rem', color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <Wrench size={15} /> Side Cores &amp; Lifters
+                </h3>
+                <p style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: '0.75rem' }}>
+                  {data.undercut_faces} trapped faces group into{' '}
+                  {data.undercut_regions.length} feature
+                  {data.undercut_regions.length === 1 ? '' : 's'}
+                  {data.undercut_summary?.side_action_axes
+                    ? ` on ${data.undercut_summary.side_action_axes} pull ${data.undercut_summary.side_action_axes === 1 ? 'axis' : 'axes'}`
+                    : ''}
+                  .
+                </p>
+
+                {data.undercut_summary?.multi_axis_warning && (
+                  <p style={{ fontSize: '0.7rem', color: '#f59e0b', marginBottom: '0.6rem' }}>
+                    Several distinct side-action axes — each adds a slide to the tool.
+                  </p>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {data.undercut_regions.map((region) => {
+                    const dir = region.side_action_direction;
+                    const pct = data.areas?.total
+                      ? (100 * region.area) / data.areas.total
+                      : 0;
+                    return (
+                      <div
+                        key={region.region_id}
+                        style={{
+                          padding: '0.6rem 0.7rem',
+                          background: 'rgba(255,255,255,0.04)',
+                          border: '1px solid var(--glass-border)',
+                          borderRadius: '6px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem' }}>
+                          <strong style={{ fontSize: '0.8rem', color: '#f87171' }}>
+                            {region.mechanism}
+                          </strong>
+                          <span style={{ fontSize: '0.7rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+                            {region.face_count} faces · {region.area.toFixed(1)} mm² · {pct.toFixed(1)}%
+                          </span>
+                        </div>
+                        {dir && (
+                          <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '0.3rem', fontVariantNumeric: 'tabular-nums' }}>
+                            pull ({dir.map((v) => v.toFixed(2)).join(', ')})
+                            {typeof region.angular_span_deg === 'number'
+                              ? ` · wraps ${region.angular_span_deg.toFixed(0)}°`
+                              : ''}
+                          </div>
+                        )}
+                        {region.rationale && (
+                          <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.25rem', lineHeight: 1.35 }}>
+                            {region.rationale}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
           </>
         )}

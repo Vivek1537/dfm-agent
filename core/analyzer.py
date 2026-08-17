@@ -5,12 +5,13 @@ core/analyzer.py — Orchestrates the backend DfM analysis pipeline.
 import math
 from typing import Optional, Tuple
 from core.models import AnalysisResult, DirectionCandidate
-from core.step_parser import parse_step
+from core.step_parser import parse_step, faces_from_shape
 from core.mold_direction import find_best_mold_direction
 from core.undercut_detector import UndercutRaycaster, evaluate_direction
 from core.draft_angle import compute_draft_angles
 from core.face_classifier import classify_faces, build_analysis_result
 from core.parting_line import find_parting_line
+from core.silhouette import split_at_silhouette
 from core.undercut_regions import find_undercut_regions
 
 
@@ -64,6 +65,20 @@ def analyze_part(
             faces, raycaster, exact_candidates=exact_candidates
         )
         direction_to_use = best_candidate.direction
+
+    # 2c. Subdivide faces the silhouette crosses, so the core/cavity boundary
+    # can run down the middle of a face instead of being pinned to its edges.
+    # A no-op for a pull along the part's own axis (nothing straddles), which
+    # is every part validated so far; it engages on a perpendicular pull.
+    split_shape = split_at_silhouette(shape, faces, direction_to_use)
+    if split_shape is not None:
+        split_faces = faces_from_shape(split_shape)
+        if split_faces:
+            faces, shape = split_faces, split_shape
+            raycaster = UndercutRaycaster(faces)
+            evaluate_direction(
+                raycaster, faces, direction_to_use, exact_fractions=True
+            )
 
     # 3. Compute draft angles (worst-case per face)
     compute_draft_angles(faces, direction_to_use)

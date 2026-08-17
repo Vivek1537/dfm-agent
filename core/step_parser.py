@@ -269,7 +269,16 @@ def parse_step(filepath: str) -> Tuple[List[FaceData], Any]:
 
     reader.TransferRoots()
     shape = reader.OneShape()
+    return faces_from_shape(shape), shape
 
+
+def faces_from_shape(shape: Any) -> List[FaceData]:
+    """Build FaceData for every face of an in-memory shape.
+
+    Split out of `parse_step` so a shape produced in code — the silhouette
+    split, for instance — can be re-sampled without a round trip through a
+    temporary STEP file.
+    """
     faces: List[FaceData] = []
     explorer = TopExp_Explorer(shape, TopAbs_FACE)
     face_id = 0
@@ -317,4 +326,4 @@ def parse_step(filepath: str) -> Tuple[List[FaceData], Any]:
         face_id += 1
         explorer.Next()
 
-    return faces, shape
+    return faces
