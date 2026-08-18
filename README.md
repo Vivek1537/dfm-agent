@@ -28,10 +28,20 @@
 
 | Feature | Description |
 | :--- | :--- |
+<<<<<<< Updated upstream
 | **Parse STEP & Evaluate Pull Direction** | Loads `.stp` files and automatically calculates the mathematically optimal mold pull direction. |
 | **Surface Normal & Draft Angle Analysis** | Classifies faces into Core, Cavity, Undercut, and Warning categories with draft angle evaluation against the resolved mold-pull direction. |
 | **Propose Core–Cavity Split** | Generates highly accurate 3D parting line loops to define the core and cavity separation. |
 | **Clear 3D Visualization** | A rich React + Three.js frontend to visualize analysis results directly in your browser. |
+=======
+| **Parse STEP & Evaluate Pull Direction** | Loads `.stp` files and finds the optimal mold pull direction. Candidates come from global axes, 45° diagonals, cylinder/cone feature axes, dominant planar normals and principal axes; selection is lexicographic, so a tidier parting line can never outrank fewer undercuts. |
+| **Ray-Based Undercut Detection** | Every face is probed along **+D and −D** from a grid of surface samples. A face is trapped when the half that *forms* it cannot pull away from it — not merely when its normal points the wrong way. |
+| **Surface Normal & Draft Angle Analysis** | Classifies faces into Core, Cavity, Undercut and Warning, reconciled against accessibility and propagated over topology so fillets inherit their neighbours. |
+| **Propose Core–Cavity Split** | Derives the parting line from the boundary between mold regions, traces it into **ordered closed loops**, and falls back to silhouette curves when the pull crosses the part axis and no B-rep edge lies on the split. |
+| **Honest Validation** | Topological, geometric and mold checks with a confidence that is **capped by failures, never averaged with them**. A part needing a slider says so and names the mechanism. |
+| **Declared Tooling Plans** | A part may declare feature groups formed by side cores or lifters (`assets/<Part>.tooling.json`). Those faces leave the main halves' books — and the required actions are reported beside the undercut count, never instead of it. |
+| **Clear 3D Visualization** | React + Three.js viewer: continuous parting loops, pull-direction arrow, colour-coded core/cavity/undercut faces, exploded view, plus Required Tooling and Alternative Configurations panels. |
+>>>>>>> Stashed changes
 
 <br />
 
@@ -131,19 +141,176 @@ This cleanly shuts down both servers, including all of their child processes. If
 
 ## Inputs & Outputs
 
+<<<<<<< Updated upstream
 - **Input:** industry-standard CAD files (`.stp` / `.step`). A sample part is included in `assets/`.
 - **Output:** an interactive browser-based 3D evaluation — manufacturability score, face classification, best pull direction (with manual override), and parting lines.
 
 <br />
 
+=======
+- **Input:** industry-standard CAD files (`.stp` / `.step`). Two reference parts are included in `assets/` (`Part1.stp`, `Part3.stp`).
+- **Output:** an interactive browser-based 3D evaluation — manufacturability score, face classification, best pull direction (with manual override), parting loops, undercut regions with recommended tooling, and a validation report.
+
+### How the parting line is derived
+
+```text
+STEP file
+   └─ faces + surface samples          core/step_parser.py
+      └─ candidate pull axes           core/pull_direction.py
+         └─ ±D ray accessibility       core/accessibility.py
+            └─ lexicographic choice    core/direction_evaluation.py
+               └─ mold regions         core/face_classifier.py
+                  └─ trapped features  core/undercut_regions.py
+                     └─ PARTING LINE   core/parting/
+```
+
+The parting line comes **last** and depends on everything above it. That is the
+design: it is an *output* of mold accessibility and region classification, not
+an edge-selection heuristic. An edge becomes a candidate only because the faces
+on either side of it belong to opposite mold halves.
+
+Inside `core/parting/`:
+
+| Module | Job |
+| :--- | :--- |
+| `boundary.py` | classify every edge by the regions either side; edges bordering an undercut are **shutoffs**, not parting line |
+| `loops.py` | vertex-keyed edge graph → ordered closed loops, open chains, branch-point counting |
+| `silhouette.py` | analytic horizon curves for cylinders, cones and planes, used only when the topological result fails validation |
+| `validation.py` | topological / geometric / mold checks, quality metrics, ranking, confidence |
+| `analyzer.py` | orchestration |
+
+<br />
+
+## Running the Tests
+
+```bash
+.venv/bin/python -m pytest tests/ -q
+```
+
+103 tests, no network or GPU needed, about 230 seconds:
+
+- `tests/test_synthetic.py` — parts built with cadquery, so the correct answer
+  is known by construction (a cup's bore must belong to the core, a radial hole
+  must be the only undercut under an axial pull, and so on).
+- `tests/test_parting_line_topology.py` — the primary parting line is a single
+  **closed, planar** loop, and the clamshell cases lie in a plane containing
+  the part axis.
+- `tests/test_pull_direction.py` — candidate generation, normalisation,
+  deduplication, and the lexicographic direction ordering. Includes the rule
+  that a shorter parting line can never buy off undercuts.
+- `tests/test_parting_pipeline.py` — boundary classification, the edge graph,
+  edge orientation, closed-loop and open-chain detection, and the acceptance
+  cases: simple box, cylinder with a flange, and a re-entrant feature that must
+  **not** be reported as solved.
+- `tests/test_delegation.py` — declared tooling plans. The property under test
+  is not "Part 3 reports zero" but that a zero reached by **delegation** can
+  never be mistaken for one reached by **geometry**: delegation is opt-in only,
+  a declared pull direction is verified rather than obeyed, and Part 1 (no side
+  actions) stays distinguishable from Part 3 (two).
+
+<br />
+
+## Validation
+
+Measured on the reference parts:
+
+### Part 3 — three configurations
+
+Part 3 is reported with a **declared tooling plan** (`assets/Part3.tooling.json`),
+which states that a side core forms the through-bore and an axial insert forms
+the splined end. The engine then finds the best split for what remains.
+
+| | Pull | Undercuts on main halves | Extra tooling | Main-half surface | Motion axes |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Primary — clamshell** | (0.819, 0.574, 0), 35° | **0** | bore side core + spline insert, both ±Z | 4706.7 mm² (62%) | 1 |
+| **Alternative 1 — axial, as-is** | Z− | 88 faces / 1366.8 mm² | **none** | 6195.3 mm² (82%) | 0 |
+| **Alternative 2 — axial + sliders** | Z− | **0** | 2 opposed sliders, 1 lateral axis | 6195.3 mm² (82%) | 1 |
+| Other clamshell orientations | PN2 / XY+ / −AX2 | **0** | needs the same bore + spline delegation | ~72.5% | 1 |
+
+Every figure is **measured, not asserted**. Whether a configuration needs the
+declared plan is re-measured per direction (`_plan_area_needed_by`): the axial
+pull draws the bore and splined end cleanly and so is charged nothing for them,
+while every clamshell orientation genuinely cannot form them. Alternative 2 is
+produced by the engine, running the same region grouper the primary path uses —
+it reports 2 regions, `side-action slider` ×2, on axis (0.643, −0.766, 0).
+
+**Read the whole row.** Both zeros are reached by *delegating*, and delegation
+always terminates at zero — any undercut set vanishes if its faces are handed
+to other tooling. What separates the configurations is the last two columns.
+
+One asymmetry to keep in view: the primary is charged its **declared** groups
+in full (2855.4 mm² — an insert forms the whole splined end, not only the
+trapped subset), whereas alternatives are charged the **minimum** their
+geometry forces. That is why neighbouring clamshell orientations show ~72.5%
+against the primary's 62%. Both are honest; they answer different questions.
+
+**Read the whole row, not the undercut column.** Both zeros are reached by
+*delegating* features to side actions, and delegation always terminates at
+zero — any undercut set vanishes if you hand its faces to other tooling. What
+distinguishes the configurations is how much of the part the two main halves
+still form, and how many independent motions the mold needs. Those columns are
+the comparison; the undercut count on its own is not.
+
+Alternative 1 is the only configuration that needs **no side actions at all**,
+which is why it is kept in view even though its trapped area is the highest.
+
+### Other reference parts
+
+| Part | Pull | Undercuts | Primary parting line | Valid |
+| :--- | :--- | :--- | :--- | :--- |
+| Part 1 (Phase 1 cap) | Z+ | 0 — **and no side actions** | planar closed rim, 8 edges @ z=15 | ✓ 0.90 |
+| O-ring nozzle (reviewer's sketch) | Y+ | 1 (the bore) | clamshell split through the part axis | ✗ 0.39 — side core forms the bore |
+| Grooved cylinder | Y− | 0 | clamshell, 12 edges | ✓ 0.80 |
+
+Part 1's zero and Part 3's zero are **not the same result**, and the tool never
+presents them as such: Part 1 carries no `required_actions`, Part 3 carries two
+totalling 2855.4 mm². A validation check named `side_actions_required` states
+this in words next to the count.
+
+Runtime on the reference parts (fast path, as the app uses it): Part 1 **1.5 s**,
+Part 3 **17.1 s**. The exact direction ranking, served separately by
+`POST /analyze/directions`, is 5.6 s and 33.5 s.
+
+**Checked against a mould that was actually built.** A public GrabCAD
+side-core mould ships its Cavity Plate and Core Plate alongside the parts they
+produce. The plates meet at **z = 0**, and the engine independently places
+PLASTIC BUSH's parting line at **z = 0.00** and flags 2 undercut regions — the
+real mould uses a slide core. Those files are large third-party downloads and
+are not tracked here.
+
+**Part 3's 88 undercuts were independently verified as genuine** (see
+`docs/untillnow.md`): the loop sits at the part's true silhouette maximum
+(r=18.000; the valid split band is z ∈ [1.00, 4.50]), the trapped faces are two
+circumferential slots at z ∈ [12.35, 21.65] with faces 21 and 23 blocked in
+*both* ±Z, and six different forced parting-line placements produce a
+byte-identical undercut set. A clamshell pull releases all 88 but traps the
+through-bore (1432.6 mm²) and splines (589.7 mm²) instead, for 2080.0 mm²
+against 1366.8 mm².
+
+**Checked against a mould that was actually built.** A public GrabCAD
+side-core mould ships its Cavity Plate and Core Plate alongside the parts they
+produce. The plates meet at **z = 0**, and the engine independently places
+PLASTIC BUSH's parting line at **z = 0.00** and flags 2 undercut regions — the
+real mould uses a slide core. Coupler lands at z = 1.00, inside the plate
+overlap. PLASTIC SLEEVE is the weakest case at z = 2.03, roughly 2 mm high.
+Those files are large third-party downloads and are not tracked here.
+
+<br />
+
+>>>>>>> Stashed changes
 ## Project Architecture
 
 ```text
 dfm-agent/
 ├── api.py           # FastAPI application entry point
-├── core/            # DfM logic (parting lines, surface classification)
+├── core/            # DfM logic: pull direction, accessibility, classification
+│   └── parting/     # region boundaries, loop tracing, silhouette, validation
 ├── frontend/        # React/Vite UI & Three.js viewer
+<<<<<<< Updated upstream
 ├── tests/           # Backend unit tests
+=======
+├── tests/           # 103 tests: ground truth, pull direction, parting pipeline, delegation
+>>>>>>> Stashed changes
 ├── app.sh           # One-click start for macOS / Linux
 ├── stop.sh          # One-click stop for macOS / Linux
 ├── app.bat          # One-click start for Windows (double-click this)

@@ -1,0 +1,42 @@
+{
+  "part": "Part3.stp",
+  "note": "Declared tooling intent, NOT a derived result. Each group names faces that a mechanism other than the two main halves forms, so the main halves are not asked to release them. Modelled on the Bosch nozzle walkthrough (docs/bosch-nozzle-review-transcript.md, 00:42.8 and 01:28.5): 'It splits the two halves, and then there will be a side core, which is used to form this, uh, pin feature.' Delete this file to see what the part costs with no side actions at all.",
+  "groups": [
+    {
+      "name": "through-bore",
+      "mechanism": "axial side core",
+      "action_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "select": {
+        "face_ids": [
+          35,
+          319,
+          320
+        ]
+      },
+      "rationale": "The r=6 through-passage and its two mouth chamfers. Its axis lies in any clamshell parting plane, so neither main half can form it; a core travelling along the part axis does. Directly analogous to the nozzle's internal wall in the reference video."
+    },
+    {
+      "name": "splined end",
+      "mechanism": "axial insert / lifter",
+      "action_axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "select": {
+        "z_min": 31.0
+      },
+      "rationale": "The 12-tooth spline, z >= 31. Tooth flanks face radially, so under any lateral draw roughly half of them are blocked by their neighbour; they release cleanly along the part axis. Selected by z band rather than face id so the group survives a re-export."
+    }
+  ],
+  "preferred_direction": [
+    0.8192,
+    0.5736,
+    0.0
+  ],
+  "preferred_rationale": "t=35 deg. Several clamshell orientations tie at zero undercuts once the two groups above are delegated (measured: a continuous zero plateau from 30 to 50 deg, plus 130 deg). They are indistinguishable to the direction search, which cannot afford to build a parting line per candidate. On parting-line quality they are not equal: t=35 gives an 18-edge primary loop at outer-boundary ratio 0.451 and confidence 0.490, against 94 edges, 0.090 and 0.342 at t=130. Declared on that basis; the engine re-measures it and will reject it if it is worse than the derived best."
+}

@@ -31,22 +31,14 @@ from OCP.IntCurvesFace import IntCurvesFace_ShapeIntersector
 from OCP.IntCurveSurface import IntCurveSurface_In
 from OCP.gp import gp_Lin, gp_Dir, gp_Pnt
 
-# Minimum ray hit distance (mm). Hits closer than this are treated as
-# self-intersection / numerical grazing artifacts, NOT true blockers.
-# Real molded walls are >= ~0.5mm, so 0.1mm is a safe cutoff.
-MIN_HIT_DISTANCE = 0.1
-
-# Offset of the ray origin along the surface normal (mm), to escape the
-# face's own surface before testing for blockers.
-RAY_ORIGIN_OFFSET = 0.01
-
-# |dot(normal, pull)| below this → sample lies on a vertical wall
-# (~0.6° from the parting plane); it escapes with EITHER mold half.
-PERP_EPS = 0.01
-
-# A face is an undercut when at least this fraction of its surface
-# samples are trapped.
-UNDERCUT_FRACTION_THRESHOLD = 0.5
+# Tolerances live in core/tolerances.py; these names are kept as aliases so
+# existing callers and tests that import them keep working.
+from core.tolerances import (
+    CLASSIFICATION_EPSILON as PERP_EPS,
+    MIN_HIT_DISTANCE,
+    RAY_ORIGIN_OFFSET,
+    UNDERCUT_FRACTION_THRESHOLD,
+)
 
 
 def _dot(a: Tuple[float, float, float],

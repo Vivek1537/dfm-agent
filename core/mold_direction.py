@@ -1,41 +1,59 @@
 """
 core/mold_direction.py — Find the optimal mold opening direction.
 
-v2 (Phase 2 rewrite):
-- Undercut detection is symmetric in +d / -d (a face is trapped for the
-  mold AXIS, not the sign), so we search unique axes only — half the rays.
-- Candidate axes: 9 fixed axes (3 cartesian + 6 diagonals, symmetric set)
-  PLUS geometry-driven axes extracted from cylinder/cone faces (a turned
-  part's optimal pull is almost always a dominant feature axis).
-- One shared UndercutRaycaster across the whole sweep (was rebuilt 13×).
-- Reduced per-face sampling during the sweep; full sampling for the winner.
-- Sign convention: the pull direction points toward the CAVITY half, chosen
-  as the side with the larger visible area (external/cosmetic side).
+v3 (parting-line rework):
+- Candidate generation moved to `core/pull_direction.py`, which adds dominant
+  planar normals and principal axes to the fixed axes and rotational feature
+  axes this module used to build itself.
+- Scoring and selection moved to `core/direction_evaluation.py`, which
+  compares candidates lexicographically instead of by a bare (area, count)
+  tuple, so accessibility, parting complexity and a deterministic tie-break
+  now settle axes that undercuts alone cannot separate.
+- Accessibility measurement moved to `core/accessibility.py`, which keeps a
+  structured per-direction result instead of mutating FaceData in place.
+  Only the WINNER's verdicts are stamped onto the faces, so evaluating one
+  axis can no longer corrupt another's numbers.
+
+Retained from v2, because both are validated behaviour:
+- Undercut trapping is symmetric in +d / -d, so the search runs over unique
+  axes and the sign is chosen afterwards.
+- Sign convention: the pull direction points toward the CAVITY half, and the
+  core enters from the side the part's internal features open toward.
 """
 
 import math
-from typing import List, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
-from core.models import FaceData, DirectionCandidate
-from core.undercut_detector import (
-    UndercutRaycaster,
-    evaluate_direction,
-    refine_direction,
+from core.accessibility import AccessibilityAnalyzer, AccessibilityResult
+from core.direction_evaluation import (
+    DirectionEvaluation,
+    evaluate_pull_direction,
+    rank_directions,
+    select_best_direction,
 )
+from core.face_classifier import face_adjacency
+from core.models import FaceData, DirectionCandidate
+from core.pull_direction import (
+    FIXED_AXES,
+    PullDirection,
+    generate_candidate_directions,
+)
+from core.tolerances import (
+    AXIS_DEDUP_DOT,
+    AnalysisConfig,
+    SIGN_SAMPLES_PER_FACE,
+    SWEEP_SAMPLES_PER_FACE,
+    resolve,
+)
+from core.undercut_detector import UndercutRaycaster
 
 _INV_SQRT2 = 1.0 / math.sqrt(2.0)
 
-# Unique search axes (sign chosen later). Symmetric diagonal coverage.
+# Legacy alias: the unique search axes, as (vector, label) pairs. Kept because
+# it is part of this module's published surface; the authoritative list now
+# lives in core/pull_direction.FIXED_AXES.
 CANDIDATE_AXES: List[Tuple[Tuple[float, float, float], str]] = [
-    ((0.0, 0.0, 1.0), "Z"),
-    ((1.0, 0.0, 0.0), "X"),
-    ((0.0, 1.0, 0.0), "Y"),
-    ((_INV_SQRT2, 0.0, _INV_SQRT2), "XZ+"),
-    ((_INV_SQRT2, 0.0, -_INV_SQRT2), "XZ-"),
-    ((0.0, _INV_SQRT2, _INV_SQRT2), "YZ+"),
-    ((0.0, -_INV_SQRT2, _INV_SQRT2), "YZ-"),
-    ((_INV_SQRT2, _INV_SQRT2, 0.0), "XY+"),
-    ((_INV_SQRT2, -_INV_SQRT2, 0.0), "XY-"),
+    (vec, label) for vec, label, _source in FIXED_AXES
 ]
 
 # Legacy alias kept for the API layer (label lookup).
@@ -44,12 +62,6 @@ CANDIDATE_DIRECTIONS: List[Tuple[Tuple[float, float, float], str]] = [
     ((1.0, 0.0, 0.0), "X+"), ((-1.0, 0.0, 0.0), "X-"),
     ((0.0, 1.0, 0.0), "Y+"), ((0.0, -1.0, 0.0), "Y-"),
 ]
-
-# Max surface samples per face during the axis sweep (full set for winner).
-SWEEP_SAMPLES_PER_FACE = 5
-
-# Two axes closer than this (|dot|) are considered duplicates.
-AXIS_DEDUP_DOT = 0.999
 
 
 def _norm(v: Tuple[float, float, float]) -> Optional[Tuple[float, float, float]]:
@@ -63,40 +75,9 @@ def _dot(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 
-def _canonical(v: Tuple[float, float, float]) -> Tuple[float, float, float]:
-    """Flip an axis so its dominant component is positive (dedup helper)."""
-    ax = max(range(3), key=lambda i: abs(v[i]))
-    return v if v[ax] >= 0 else (-v[0], -v[1], -v[2])
-
-
-def _geometry_axes(faces: List[FaceData], max_axes: int = 3) -> List[Tuple[Tuple[float, float, float], str]]:
-    """
-    Extract dominant rotational-feature axes (cylinders/cones), weighted by
-    face area. These are the natural pull-direction candidates for real parts.
-    """
-    clusters: List[Tuple[Tuple[float, float, float], float]] = []  # (axis, cum_area)
-    for f in faces:
-        if f.axis is None:
-            continue
-        a = _norm(tuple(f.axis))
-        if a is None:
-            continue
-        a = _canonical(a)
-        for i, (c_axis, c_area) in enumerate(clusters):
-            if abs(_dot(a, c_axis)) > AXIS_DEDUP_DOT:
-                clusters[i] = (c_axis, c_area + f.area)
-                break
-        else:
-            clusters.append((a, f.area))
-
-    clusters.sort(key=lambda t: t[1], reverse=True)
-
-    result = []
-    for i, (axis, _area) in enumerate(clusters[:max_axes]):
-        label = f"AX{i + 1}({axis[0]:.2f},{axis[1]:.2f},{axis[2]:.2f})"
-        result.append((axis, label))
-    return result
-
+# ---------------------------------------------------------------------------
+# Labels
+# ---------------------------------------------------------------------------
 
 def _flip_direction_label(label: str) -> str:
     """Label for the opposite direction: 'Z+'↔'Z-', 'XZ+'↔'-XZ+', 'AX1(..)'↔'-AX1(..)'."""
@@ -113,6 +94,10 @@ def _axis_label_to_direction_label(axis_label: str, sign: int) -> str:
         return f"{axis_label}{'+' if sign > 0 else '-'}"
     return axis_label if sign > 0 else f"-{axis_label}"
 
+
+# ---------------------------------------------------------------------------
+# Pull sign
+# ---------------------------------------------------------------------------
 
 def _pick_sign(
     faces: List[FaceData],
@@ -137,11 +122,6 @@ def _pick_sign(
             elif d < -0.01:
                 neg_area += w
     return 1 if pos_area >= neg_area else -1
-
-
-# Max surface samples per face when picking the pull sign (internality
-# probing costs 3 rays per sample; 5 is plenty for a direction vote).
-SIGN_SAMPLES_PER_FACE = 5
 
 
 def _pick_sign_internal(
@@ -201,23 +181,183 @@ def _pick_sign_internal(
     return -1 if core_pos_w > core_neg_w else 1
 
 
+# ---------------------------------------------------------------------------
+# Search
+# ---------------------------------------------------------------------------
+
+def _to_candidate(
+    ev: DirectionEvaluation, faces: List[FaceData]
+) -> DirectionCandidate:
+    """Project a DirectionEvaluation onto the legacy DirectionCandidate.
+
+    `DirectionCandidate` is what the API response and the UI's direction
+    panel are built on, so it keeps its exact shape. The richer evaluation
+    is carried alongside on `.evaluation` for callers that want the extra
+    fields without a schema change.
+    """
+    axis = ev.vector
+    sign = _pick_sign(faces, axis)
+    candidate = DirectionCandidate(
+        direction=(axis[0] * sign, axis[1] * sign, axis[2] * sign),
+        label=_axis_label_to_direction_label(ev.direction.label, sign),
+        undercut_count=ev.undercut_count,
+        undercut_area=ev.undercut_area,
+        pruned=ev.pruned,
+    )
+    candidate.evaluation = ev
+    return candidate
+
+
+def evaluate_all_directions(
+    faces: List[FaceData],
+    analyzer: AccessibilityAnalyzer,
+    config: Optional[AnalysisConfig] = None,
+    exact_candidates: bool = True,
+    shape: Any = None,
+) -> List[DirectionEvaluation]:
+    """Measure every candidate axis and return the evaluations, best first.
+
+    `exact_candidates=False` enables branch-and-bound pruning: an axis is
+    abandoned the moment its running undercut area passes the incumbent best,
+    since it has already lost. The winner is identical either way; the losers
+    come back flagged `pruned` with lower-bound figures.
+
+    `shape` lets the evaluator count connected mold regions, which is the
+    parting-complexity tie-break. It is built once here and reused for every
+    direction; without it complexity falls back to area balance.
+    """
+    cfg = resolve(config)
+    candidates = generate_candidate_directions(faces, cfg)
+    adjacency = face_adjacency(shape, faces) if shape is not None else {}
+
+    evaluations: List[DirectionEvaluation] = []
+    best_area: Optional[float] = None
+
+    for pull in candidates:
+        access = analyzer.analyze(
+            pull.vector,
+            max_samples=cfg.sweep_samples_per_face,
+            abort_above_area=None if exact_candidates else best_area,
+            # Ranking needs the release verdict, not reachability from each
+            # side. Measuring the full four-way for every candidate doubles
+            # the sweep's ray count to produce numbers only the winner uses.
+            four_way=False,
+        )
+        if best_area is None or access.undercut_area < best_area:
+            best_area = access.undercut_area
+        evaluations.append(evaluate_pull_direction(pull, access, adjacency))
+
+    return rank_directions(evaluations)
+
+
+def _measure_winner(
+    analyzer: AccessibilityAnalyzer,
+    faces: List[FaceData],
+    direction: Tuple[float, float, float],
+    cfg: AnalysisConfig,
+) -> AccessibilityResult:
+    """Full accessibility for the chosen direction, without paying for it twice.
+
+    Two passes rather than one, because the two things being measured have
+    very different costs and needs:
+
+      1. A four-way pass at SWEEP sample density over every face. This is what
+         gives each face its mold region, and every face needs one. Most of
+         its rays are already in the analyzer's cache from the sweep, which
+         probed the same samples along one of the two directions.
+
+      2. A FULL-density re-measurement of only the faces that showed any
+         trapping in pass 1. Those are the faces whose reported
+         `trapped_fraction` is a user-facing confidence figure and must be
+         exact; a face with zero trapped samples across an evenly-spread
+         sweep is not going to turn out majority-trapped at full density.
+
+    Measuring every face at full density instead costs 15.4 s of Part 3's
+    27 s — more than the entire nine-axis sweep, which is 3.4 s — to refine
+    numbers that are already zero for the great majority of faces.
+    """
+    result = analyzer.analyze(
+        direction, max_samples=cfg.sweep_samples_per_face, four_way=True
+    )
+
+    suspect = [
+        f for f in faces
+        if result.faces.get(f.face_id)
+        and result.faces[f.face_id].trapped_fraction > 0.0
+    ]
+    if not suspect:
+        return result
+
+    refined = analyzer.analyze(direction, faces=suspect, four_way=True)
+    for face_id, entry in refined.faces.items():
+        result.faces[face_id] = entry
+
+    # Recompute the roll-ups, since a refined verdict can flip a face either
+    # way and the totals must agree with the per-face entries.
+    result.total_area = 0.0
+    result.undercut_area = 0.0
+    result.undercut_count = 0
+    result.accessible_area = 0.0
+    result.plus_area = 0.0
+    result.minus_area = 0.0
+    for entry in result.faces.values():
+        result.total_area += entry.area
+        if entry.is_undercut:
+            result.undercut_count += 1
+            result.undercut_area += entry.area
+        else:
+            result.accessible_area += entry.area
+        result.plus_area += entry.area * entry.plus_fraction
+        result.minus_area += entry.area * entry.minus_fraction
+    return result
+
+
 def find_best_mold_direction(
     faces: List[FaceData],
     raycaster: Optional[UndercutRaycaster] = None,
+<<<<<<< Updated upstream
 ) -> Tuple[DirectionCandidate, List[DirectionCandidate]]:
     """
     Search all candidate axes (fixed + geometry-derived) for the direction
     with the fewest trapped faces. Returns (best, all_candidates) and leaves
     `faces` fully evaluated (all samples) for the best direction.
+=======
+    exact_candidates: bool = True,
+    config: Optional[AnalysisConfig] = None,
+    analyzer: Optional[AccessibilityAnalyzer] = None,
+    shape: Any = None,
+) -> Tuple[DirectionCandidate, List[DirectionCandidate]]:
     """
-    if raycaster is None:
-        raycaster = UndercutRaycaster(faces)
+    Search all candidate axes (fixed + geometry-derived) for the best pull
+    direction. Returns (best, all_candidates) and leaves `faces` fully
+    evaluated (all samples) for the winning direction.
 
-    axes = list(CANDIDATE_AXES)
-    for geo_axis, label in _geometry_axes(faces):
-        if all(abs(_dot(geo_axis, a)) < AXIS_DEDUP_DOT for a, _ in axes):
-            axes.append((geo_axis, label))
+    `exact_candidates` (default) evaluates every axis in full so each entry
+    in the returned ranking carries a real undercut count and area.
 
+    Branch-and-bound pruning (exact_candidates=False) finds the same winner
+    roughly 5x faster, but it abandons a losing axis the moment its running
+    undercut area passes the incumbent — and because faces are visited
+    biggest-first, that is usually after a single face. Every loser then
+    reports the same ">=1 undercuts", which is honest but tells a user
+    nothing about how the directions compare. Since ranking candidate
+    directions is the point of this panel, the exact numbers are worth the
+    extra time; reducing sample density instead is NOT a valid trade, as it
+    measurably reorders the ranking.
+>>>>>>> Stashed changes
+    """
+    cfg = resolve(config)
+    if analyzer is None:
+        analyzer = AccessibilityAnalyzer(faces, raycaster, cfg)
+    raycaster = analyzer.raycaster
+
+    adjacency = face_adjacency(shape, faces) if shape is not None else {}
+    evaluations = evaluate_all_directions(
+        faces, analyzer, cfg, exact_candidates, shape=shape
+    )
+    best_eval = select_best_direction(evaluations)
+
+<<<<<<< Updated upstream
     candidates: List[DirectionCandidate] = []
     best_area_so_far: Optional[float] = None
     best_snapshot: Optional[List[Tuple[bool, float]]] = None
@@ -252,20 +392,22 @@ def find_best_mold_direction(
     # split into several small patches shouldn't outrank one large trapped
     # face. Count is the tie-break.
     candidates.sort(key=lambda c: (c.undercut_area, c.undercut_count))
+=======
+    candidates = [_to_candidate(ev, faces) for ev in evaluations]
+    best = candidates[evaluations.index(best_eval)]
+>>>>>>> Stashed changes
 
     # Refine the WINNER's pull sign using internal-feature analysis (the
     # sweep uses a cheap area heuristic; sign doesn't affect undercuts,
     # but it decides which half is called core vs cavity downstream).
-    best = candidates[0]
-    axis = best.direction
-    axis_mag = math.sqrt(sum(c * c for c in axis))
-    unit_axis = tuple(c / axis_mag for c in axis)
-    refined = _pick_sign_internal(faces, unit_axis, raycaster)
-    refined_dir = tuple(c * refined for c in unit_axis)
+    axis = best_eval.vector
+    refined = _pick_sign_internal(faces, axis, raycaster)
+    refined_dir = tuple(c * refined for c in axis)
     if any(abs(a - b) > 1e-9 for a, b in zip(refined_dir, best.direction)):
         best.label = _flip_direction_label(best.label)
         best.direction = refined_dir
 
+<<<<<<< Updated upstream
     # Restore the winner's sweep verdicts, then re-check at full sample
     # resolution ONLY the faces that showed any trapping (huge speedup on
     # parts where most faces are free).
@@ -276,5 +418,17 @@ def find_best_mold_direction(
         refine_direction(raycaster, faces, best.direction)
     else:
         evaluate_direction(raycaster, faces, best.direction)
+=======
+    # Re-measure the winner and stamp its verdicts onto the faces. The sweep
+    # ran on a reduced sample set and measured only the release verdict, so
+    # its trapped fractions are a ranking signal, not a reportable confidence.
+    final = _measure_winner(analyzer, faces, best.direction, cfg)
+    analyzer.apply_to_faces(final)
+    best.undercut_count = final.undercut_count
+    best.undercut_area = final.undercut_area
+    best.pruned = False
+    best.evaluation = evaluate_pull_direction(best_eval.direction, final, adjacency)
+    best.accessibility = final
+>>>>>>> Stashed changes
 
     return best, candidates

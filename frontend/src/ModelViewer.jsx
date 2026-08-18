@@ -408,48 +408,56 @@ function MeshBuilder({ geometry, bboxInfo, moldDirection, showCore, showCavity }
 }
 
 // ── PARTING LINE RENDERER ─────────────────────────────────────────────────
-// Each segment from the API is an independent list of sampled edge points.
-// We render every segment as its own <Line> so they precisely hug the part
-// boundary without any spurious cross-part connectors.
+// The backend sends each loop as an ORDERED polyline (`polyline`) — its
+// points in traversal order, all the way round. That is drawn as a single
+// continuous <Line>, which is what a parting line is: one connected curve.
+//
+// Previously each CAD edge was rendered as its own <Line> from `segments`,
+// which drew a disconnected collection of edges and called it a parting line.
+// `segments` is still accepted as a fallback for a loop with no polyline.
+//
+// The primary loop is drawn solid and thick; any further loops (a part with a
+// through-hole genuinely parts on more than one) are drawn thinner so the
+// main split stays readable.
 
 function PartingLines({ geometry, bboxInfo }) {
-  const segments = useMemo(() => {
+  const curves = useMemo(() => {
     const result = [];
     if (!geometry || !geometry.parting_lines) return result;
 
+    const recentre = (p) => [
+      p[0] - bboxInfo.center.x,
+      p[1] - bboxInfo.center.y,
+      p[2] - bboxInfo.center.z
+    ];
+
     geometry.parting_lines.forEach((item, loopIdx) => {
       if (!item) return;
+      const isPrimary = item.is_primary !== false;
 
-      // Each parting_lines entry has a `segments` array.
-      // Each segment is already a list of [x,y,z] points along one CAD edge.
-      // Render each segment independently — never stitch across segment boundaries.
-      if (item.segments && Array.isArray(item.segments)) {
+      if (Array.isArray(item.polyline) && item.polyline.length >= 2) {
+        result.push({
+          points: item.polyline.map(recentre),
+          id: `pl-${loopIdx}`,
+          isPrimary,
+        });
+        return;
+      }
+
+      // Fallbacks, in descending order of fidelity.
+      if (Array.isArray(item.segments)) {
         item.segments.forEach((seg, segIdx) => {
           if (!seg || seg.length < 2) return;
-          const pts = seg.map(p => [
-            p[0] - bboxInfo.center.x,
-            p[1] - bboxInfo.center.y,
-            p[2] - bboxInfo.center.z
-          ]);
-          result.push({ points: pts, id: `pl-${loopIdx}-${segIdx}` });
+          result.push({
+            points: seg.map(recentre),
+            id: `pl-${loopIdx}-${segIdx}`,
+            isPrimary,
+          });
         });
-      } else if (item.points && Array.isArray(item.points)) {
-        // Fallback: flat points array
-        if (item.points.length < 2) return;
-        const pts = item.points.map(p => [
-          p[0] - bboxInfo.center.x,
-          p[1] - bboxInfo.center.y,
-          p[2] - bboxInfo.center.z
-        ]);
-        result.push({ points: pts, id: `pl-${loopIdx}-0` });
-      } else if (Array.isArray(item)) {
-        if (item.length < 2) return;
-        const pts = item.map(p => [
-          p[0] - bboxInfo.center.x,
-          p[1] - bboxInfo.center.y,
-          p[2] - bboxInfo.center.z
-        ]);
-        result.push({ points: pts, id: `pl-${loopIdx}-0` });
+      } else if (Array.isArray(item.points) && item.points.length >= 2) {
+        result.push({ points: item.points.map(recentre), id: `pl-${loopIdx}`, isPrimary });
+      } else if (Array.isArray(item) && item.length >= 2) {
+        result.push({ points: item.map(recentre), id: `pl-${loopIdx}`, isPrimary });
       }
     });
 
@@ -458,18 +466,59 @@ function PartingLines({ geometry, bboxInfo }) {
 
   return (
     <group>
-      {segments.map(({ points, id }) => (
+      {curves.map(({ points, id, isPrimary }) => (
         <Line
           key={id}
           points={points}
-          color="#3B82F6"
-          lineWidth={3}
+          color={isPrimary ? '#3B82F6' : '#7C3AED'}
+          lineWidth={isPrimary ? 4 : 2}
           transparent
-          opacity={1}
+          opacity={isPrimary ? 1 : 0.75}
           depthTest={false}
           renderOrder={999}
         />
       ))}
+    </group>
+  );
+}
+
+// ── PULL DIRECTION ARROW ──────────────────────────────────────────────────
+// The selected mold opening direction, drawn through the part so the core /
+// cavity split and the parting line can be read against the axis that
+// produced them.
+
+function PullDirectionArrow({ moldDirection, bboxInfo }) {
+  const arrow = useMemo(() => {
+    const dir = new THREE.Vector3(...moldDirection);
+    if (dir.lengthSq() < 1e-6) return null;
+    dir.normalize();
+    const length = bboxInfo.diagonal * 0.75;
+    const origin = dir.clone().multiplyScalar(-length * 0.5);
+    return new THREE.ArrowHelper(
+      dir, origin, length, 0x7C3AED, length * 0.14, length * 0.07
+    );
+  }, [moldDirection, bboxInfo]);
+
+  if (!arrow) return null;
+
+  const labelPos = new THREE.Vector3(...moldDirection)
+    .normalize()
+    .multiplyScalar(bboxInfo.diagonal * 0.42);
+
+  return (
+    <group>
+      <primitive object={arrow} />
+      <Billboard position={[labelPos.x, labelPos.y, labelPos.z]}>
+        <Text
+          color="#7C3AED"
+          fontSize={bboxInfo.diagonal * 0.045}
+          fontWeight={700}
+          anchorX="center"
+          anchorY="middle"
+          depthTest={false}
+          renderOrder={1000}
+        >PULL</Text>
+      </Billboard>
     </group>
   );
 }
@@ -945,9 +994,15 @@ export default function ModelViewer({ geometry }) {
           />
 
           {/* Parting Lines */}
-          <PartingLines 
-            geometry={geometry} 
-            bboxInfo={bboxInfo} 
+          <PartingLines
+            geometry={geometry}
+            bboxInfo={bboxInfo}
+          />
+
+          {/* Selected mold pull direction */}
+          <PullDirectionArrow
+            moldDirection={moldDirection}
+            bboxInfo={bboxInfo}
           />
 
           {/* Sync camera reference */}

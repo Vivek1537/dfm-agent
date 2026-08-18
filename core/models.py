@@ -39,16 +39,45 @@ class FaceData:
     is_undercut: bool = False
     trapped_fraction: float = 0.0            # fraction of surface samples that are trapped [0, 1]
 
+    # ── Accessibility-derived region (core.accessibility.MoldRegion value) ──
+    # "core" / "cavity" / "neutral" / "undercut" / "ambiguous".
+    #
+    # Kept ALONGSIDE mold_half rather than replacing it. mold_half answers
+    # "which steel forms this face" and is always one of the two halves — the
+    # API and the viewer are built on that, and a face has to be molded by
+    # something. mold_region additionally records where the answer came from
+    # and admits that it is sometimes undecided, which is what the parting
+    # boundary needs: a NEUTRAL face borders both halves without separating
+    # them, and an edge against an UNDERCUT face is a shutoff, not a parting
+    # line. Collapsing the two would throw that distinction away.
+    mold_region: str = ""
+    # True when a declared side action forms this face, so the two main
+    # halves are not responsible for releasing it. See core/delegation.py.
+    is_delegated: bool = False
+
 
 @dataclass
 class DirectionCandidate:
-    """One candidate mold opening direction and its undercut metrics."""
+    """One candidate mold opening direction and its undercut metrics.
+
+    This is the shape the API response and the UI's direction panel are built
+    on, so the first five fields do not change. `evaluation` and
+    `accessibility` carry the richer per-direction analysis alongside for
+    callers that want it, without forcing a schema migration on those that
+    don't.
+    """
 
     direction: Tuple[float, float, float]    # (nx, ny, nz) unit vector
     label: str                               # human-readable: "Z+" / "Z-" / "X+Y+" etc.
     undercut_count: int                      # number of faces that are undercut
     undercut_area: float                     # total undercut area in mm²
     pruned: bool = False                     # True: evaluation aborted early — count/area are lower bounds
+
+    # core.direction_evaluation.DirectionEvaluation — severity, accessibility,
+    # complexity and the display score for this direction.
+    evaluation: Any = None
+    # core.accessibility.AccessibilityResult for the winning direction only.
+    accessibility: Any = None
 
 
 @dataclass
@@ -64,8 +93,29 @@ class AnalysisResult:
     best_direction_label: str = ""
     is_override: bool = False
 
-    # ── Filled by Person B (parting line detection) ──
+    # ── Parting line ──
+    # Edges of the primary loop. A flat edge list is exactly the
+    # "disconnected collection of edges" a parting line must not be presented
+    # as, so it is kept only for the callers already typed against it; the
+    # ordered loops, validation and confidence live on `parting_line`.
     parting_line_edges: List[Any] = field(default_factory=list)
+    # core.parting.models.PartingLineResult for the chosen direction.
+    parting_line: Any = None
+
+    # ── Tooling ──
+    # core.delegation.ToolingPlan: the feature groups the caller declared
+    # are formed by side actions rather than by the two main halves. Empty
+    # unless a plan was supplied. `required_actions` is the resolved,
+    # reportable form and MUST be surfaced wherever undercut counts are:
+    # a zero reached by delegation is not the same result as a zero
+    # reached by geometry, and the two must never look alike.
+    tooling_plan: Any = None
+    required_actions: List[Any] = field(default_factory=list)
+    # Outcome of verifying a plan's declared preferred direction against
+    # what the search derived. Empty when no direction was declared.
+    preferred_direction_note: str = ""
+    # Alternative configurations evaluated for the same part, best first.
+    alternatives: List[Any] = field(default_factory=list)
 
     # ── Summary counts (filled during face classification) ──
     core_face_count: int = 0

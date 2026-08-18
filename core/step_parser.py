@@ -151,6 +151,7 @@ def _get_face_axis(adaptor: BRepAdaptor_Surface):
 
 # Number of UV samples per direction, by surface type. Curved faces can have
 # normals spanning a wide arc, so a single midpoint normal misrepresents them.
+<<<<<<< Updated upstream
 _SAMPLE_GRID = {
     "PLANE": 3,       # planes: normal constant, but points matter for raycasting
     "CYLINDER": 5,
@@ -162,6 +163,15 @@ _SAMPLE_GRID = {
     "OTHER": 5,
 }
 _MAX_SAMPLES = 15
+=======
+# Below _MIN_SAMPLES a face's undercut verdict is effectively a single-ray
+# decision, so the sampler retries on a denser UV grid before giving up.
+from core.tolerances import (
+    MAX_SAMPLES_PER_FACE as _MAX_SAMPLES,
+    MIN_SAMPLES_PER_FACE as _MIN_SAMPLES,
+    SAMPLE_GRID as _SAMPLE_GRID,
+)
+>>>>>>> Stashed changes
 
 
 def _sample_face(face, adaptor: BRepAdaptor_Surface, surface_type: str, is_reversed: bool):

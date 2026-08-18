@@ -42,7 +42,7 @@ from core.undercut_detector import UndercutRaycaster
 
 logger = logging.getLogger(__name__)
 
-_PERP_EPS = 0.01
+from core.tolerances import CLASSIFICATION_EPSILON as _PERP_EPS
 
 # Fallback when adjacency offers no discriminator (no decided neighbour, or an
 # exact tie): keep the historical convention — the cavity wraps the part's
@@ -222,6 +222,21 @@ def _shared_edge_lengths(
     return adjacency
 
 
+def face_adjacency(shape: Any, faces: List[FaceData]) -> Dict[int, Set[int]]:
+    """{face_id: {neighbouring face ids}} over shared B-rep edges.
+
+    The unweighted view of `_shared_edge_lengths`, published because the
+    direction evaluator needs it to count connected mold regions and it would
+    otherwise build its own second copy of the same traversal.
+    """
+    if shape is None:
+        return {}
+    return {
+        fid: set(neighbours)
+        for fid, neighbours in _shared_edge_lengths(shape, faces).items()
+    }
+
+
 def _connected_regions(
     member_ids: Set[int], adjacency: Dict[int, Dict[int, float]]
 ) -> List[List[int]]:
@@ -330,6 +345,179 @@ def _resolve_ambiguous_regions(
                 evidence.get("internal"), evidence.get("samples"),
                 weights["cavity"], weights["core"], half, reason,
             )
+
+
+# ---------------------------------------------------------------------------
+# Accessibility-consistent regions (specification section 7)
+# ---------------------------------------------------------------------------
+
+def classify_mold_regions(
+    faces: List[FaceData],
+    mold_direction: Tuple[float, float, float],
+    access: Any = None,
+    raycaster: Optional[UndercutRaycaster] = None,
+    shape: Any = None,
+    config: Any = None,
+) -> List[FaceData]:
+    """Assign `mold_half` AND `mold_region` to every face.
+
+    Three stages, in order of authority:
+
+      1. NORMAL VOTING + REACHABILITY -- `classify_faces` above, unchanged.
+         This is the validated classifier: it reproduces the mentor's cup
+         example, both Bosch parts and every synthetic ground-truth fixture,
+         and it already resolves vertical walls by raycast and genuinely
+         ambiguous walls per region by shortest interface.
+
+      2. ACCESSIBILITY RECONCILIATION -- specification section 7 requires the
+         final classification to be consistent with accessibility. Where the
+         four-way probe is DECISIVE (one side reaches the face, the other
+         essentially cannot) and disagrees with stage 1, accessibility wins:
+         steel that cannot touch a surface cannot form it. Where the probe is
+         not decisive, stage 1 stands, because a normal vote carries real
+         information that reachability alone does not.
+
+      3. TOPOLOGY PROPAGATION -- sliver faces and faces the earlier stages
+         left undecided take the half their neighbours agree on, weighted by
+         shared edge length. A 0.2 mm fillet has no reliable normal and no
+         meaningful reachability of its own; letting it disagree with the wall
+         it blends into puts a spurious loop of parting line around it.
+
+    `mold_half` keeps its exact previous meaning -- one of the two halves,
+    always set. `mold_region` records the richer answer including NEUTRAL and
+    UNDERCUT, which is what the parting boundary needs.
+    """
+    from core.accessibility import MoldRegion
+    from core.tolerances import resolve
+
+    cfg = resolve(config)
+
+    # Stage 1 — the validated classifier.
+    classify_faces(faces, mold_direction, raycaster, shape=shape)
+
+    adjacency = _shared_edge_lengths(shape, faces) if shape is not None else {}
+    by_id = {f.face_id: f for f in faces}
+
+    # Stage 2 — reconcile with accessibility where it is decisive.
+    reconciled = 0
+    for face in faces:
+        if getattr(face, "is_delegated", False):
+            # Formed by a declared side action. It still gets a mold_half so
+            # the viewer has something to colour, but its REGION records that
+            # neither main half is responsible for it, and nothing downstream
+            # may quietly reassign that.
+            face.mold_region = MoldRegion.DELEGATED.value
+            if not face.mold_half:
+                face.mold_half = _EXTERNAL_TIE_DEFAULT
+            continue
+        if face.is_undercut:
+            face.mold_region = MoldRegion.UNDERCUT.value
+            continue
+
+        entry = access.faces.get(face.face_id) if access is not None else None
+        if entry is None:
+            face.mold_region = face.mold_half or MoldRegion.AMBIGUOUS.value
+            continue
+
+        thresh = cfg.access_fraction_threshold
+        reach_plus = entry.plus_fraction >= thresh
+        reach_minus = entry.minus_fraction >= thresh
+
+        decisive_half: Optional[str] = None
+        if reach_plus and not reach_minus:
+            decisive_half = "cavity"      # pull points toward the cavity
+        elif reach_minus and not reach_plus:
+            decisive_half = "core"
+
+        if decisive_half is not None and face.mold_half != decisive_half:
+            logger.debug(
+                "face %d: accessibility overrides %s -> %s "
+                "(reach +%.2f / -%.2f)",
+                face.face_id, face.mold_half, decisive_half,
+                entry.plus_fraction, entry.minus_fraction,
+            )
+            face.mold_half = decisive_half
+            reconciled += 1
+
+        face.mold_region = entry.region.value
+        # NEUTRAL and AMBIGUOUS faces still need a forming half for the API
+        # and the viewer; stage 1 supplied one and it stands.
+        if entry.region in (MoldRegion.NEUTRAL, MoldRegion.AMBIGUOUS):
+            if not face.mold_half:
+                face.mold_half = _EXTERNAL_TIE_DEFAULT
+
+    if reconciled:
+        logger.debug("accessibility reconciled %d face(s)", reconciled)
+
+    # Stage 3 — propagate over topology.
+    _propagate_slivers(faces, by_id, adjacency, cfg)
+
+    for face in faces:
+        face.classification = "undercut" if face.is_undercut else face.mold_half
+
+    return faces
+
+
+def _propagate_slivers(
+    faces: List[FaceData],
+    by_id: Dict[int, FaceData],
+    adjacency: Dict[int, Dict[int, float]],
+    cfg: Any,
+) -> None:
+    """Give sliver faces the half their neighbours agree on.
+
+    Runs to a fixed point so a chain of slivers resolves consistently rather
+    than depending on iteration order, bounded so a pathological mesh cannot
+    spin. Slivers never vote — only faces large enough to have a trustworthy
+    classification do — which is what stops two adjacent slivers from
+    confirming each other's noise.
+    """
+    if not adjacency:
+        return
+
+    slivers = [
+        f for f in faces
+        if not f.is_undercut
+        and not getattr(f, "is_delegated", False)
+        and 0.0 < f.area < cfg.sliver_face_area
+    ]
+    if not slivers:
+        return
+
+    sliver_ids = {f.face_id for f in slivers}
+    moved = 0
+    for _ in range(4):
+        changed = False
+        for face in slivers:
+            weights = {"core": 0.0, "cavity": 0.0}
+            for neighbour_id, shared in sorted(adjacency.get(face.face_id, {}).items()):
+                if neighbour_id in sliver_ids:
+                    continue
+                neighbour = by_id.get(neighbour_id)
+                if neighbour is None or neighbour.is_undercut:
+                    continue
+                if getattr(neighbour, "is_delegated", False):
+                    # A delegated face is formed by other tooling, so it says
+                    # nothing about where the main halves' split should run.
+                    continue
+                if neighbour.mold_half in weights:
+                    weights[neighbour.mold_half] += shared
+            if weights["core"] == weights["cavity"]:
+                continue          # no discriminator: leave it where it is
+            winner = "cavity" if weights["cavity"] > weights["core"] else "core"
+            if face.mold_half != winner:
+                face.mold_half = winner
+                face.mold_region = winner
+                changed = True
+                moved += 1
+        if not changed:
+            break
+
+    if moved:
+        logger.debug(
+            "topology propagation moved %d sliver face(s) below %.2f mm²",
+            moved, cfg.sliver_face_area,
+        )
 
 
 def build_analysis_result(

@@ -216,3 +216,16 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+<<<<<<< Updated upstream
+=======
+
+# macOS artifacts
+.DS_Store
+
+# local Claude Code config
+.claude/
+
+# Ignore all local prompt files
+docs/prompts/
+docs/reference_images/
+>>>>>>> Stashed changes
