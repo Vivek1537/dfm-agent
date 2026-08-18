@@ -142,13 +142,12 @@ This cleanly shuts down both servers, including all of their child processes. If
 .venv/bin/python -m pytest tests/ -q
 ```
 
-29 tests, no network or GPU needed, about 90 seconds:
+33 tests, no network or GPU needed, about 2 minutes:
 
 - `tests/test_synthetic.py` — 24 tests over parts built with cadquery, so the
   correct answer is known by construction (a cup's bore must belong to the
   core, a radial hole must be the only undercut under an axial pull, and so on).
-- `tests/test_parting_line_topology.py` — 5 tests asserting the primary parting
-  line is a single **closed, planar** loop.
+- `tests/test_parting_line_topology.py` — 9 tests asserting the primary parting line is a single **closed, planar** loop, and the O-ring-nozzle case from the Bosch review call (perpendicular pull, clamshell parting plane).
 
 <br />
 
@@ -159,7 +158,7 @@ Measured on the reference parts:
 | Part | Pull | Undercuts | Primary parting line |
 | :--- | :--- | :--- | :--- |
 | Part 1 (Phase 1 cap) | Z+ | 0 | planar closed rim, 8 edges @ z=15 |
-| Part 3 (Phase 2) | Z− | 88 | planar closed circle ø36 @ z=4 |
+| Part 3 (Phase 2) | Z− | 2 side-action regions on 1 axis (88 faces) | planar closed circle ø36 @ z=4 |
 | GrabCAD cup holder | Z− | 8 | closed loop, 24 edges |
 
 **Checked against a mould that was actually built.** A public GrabCAD
@@ -179,7 +178,7 @@ dfm-agent/
 ├── api.py           # FastAPI application entry point
 ├── core/            # DfM logic (parting lines, surface classification)
 ├── frontend/        # React/Vite UI & Three.js viewer
-├── tests/           # 29 tests: synthetic ground truth + parting-line topology
+├── tests/           # 33 tests: synthetic ground truth + parting-line topology
 ├── app.sh           # One-click start for macOS / Linux
 ├── stop.sh          # One-click stop for macOS / Linux
 ├── app.bat          # One-click start for Windows (double-click this)

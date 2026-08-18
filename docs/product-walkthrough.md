@@ -3,7 +3,7 @@
 Welcome to the AI-driven DfM Tool. This walkthrough will guide you through the process of analyzing a CAD part for injection molding manufacturability.
 
 ## 1. Getting Started
-1. Run `./app.sh` from the root directory to start both the backend and frontend simultaneously.
+1. Windows: double-click `app.bat`. macOS/Linux: run `./app.sh`. Either starts the backend and frontend together.
 2. Open your browser and navigate to the frontend URL (typically `http://localhost:5173`).
 
 ## 2. Uploading a Part
@@ -16,8 +16,10 @@ Once the analysis is complete, the left sidebar will populate with key metrics:
 - **Score**: A manufacturability score out of 100. Higher is better.
 - **Total Faces**: The number of geometric faces processed.
 - **Best Pull Dir**: The optimal mold opening direction discovered by the algorithm (e.g., `Z- axis`).
-- **Undercuts**: The number of faces that are physically trapped and cannot be molded without side-actions.
-- **Parting Lines**: The number of continuous parting line loops and individual edges separating the core and cavity halves.
+- **Undercuts**: The number of trapped FEATURES (side-action regions) and the axis they retract on; the raw trapped-face count is shown underneath. Part 3 reads *2 regions on 1 side-action axis · 88 faces*.
+- **Main Parting Line**: the single closed loop where core and cavity surfaces meet (planar on both reference parts), with its edge count.
+- **Pull direction override**: pick any ranked candidate from the dropdown or type a custom `x,y,z` vector; the whole analysis recomputes for it. *Reset* returns to the auto-detected direction.
+- **Side Cores & Lifters**: each undercut region with its mechanism (side-action slider / lifter / collapsible core), retraction axis and area.
 
 Below the metrics, you will find a breakdown of the faces (Core, Cavity, Warning).
 
@@ -28,8 +30,8 @@ The main window displays a premium 3D visualization of your part.
 - **Zoom**: Scroll up or down to zoom in and out.
 
 **Color Legend**:
-- **Grey**: Standard core and cavity faces.
+- **Blue**: Core faces. **Amber/gold**: Cavity faces (toggle *Core* / *Cavity* to explode the halves apart along the pull axis).
 - **Red**: Undercut faces (trapped geometry).
-- **Cyan**: The parting line wireframe looping around the model.
-
+- **Orange (Warning)**: low-draft faces — walls at 0° draft; Bosch adds draft later, so these are warnings, not defects.
+- **Cyan**: The main parting line looping around the model.
 

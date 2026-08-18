@@ -193,10 +193,18 @@ function App() {
               <div className="metric-card">
                 <div className="metric-label">Undercuts</div>
                 <div className="metric-value" style={{ color: data.undercut_faces > 0 ? '#ef4444' : '#10b981' }}>
-                  {data.undercut_faces}
+                  {/* Headline the physical FEATURE count (side-action regions), not the
+                      B-rep face count: one groove arrives as dozens of fillet slivers. */}
+                  {data.undercut_regions?.length ?? (data.undercut_faces > 0 ? 1 : 0)}
                 </div>
                 <div className="metric-subtext">
-                  Faces trapped in mold
+                  {data.undercut_faces > 0
+                    ? `${data.undercut_regions?.length === 1 ? 'region' : 'regions'}` +
+                      (data.undercut_summary?.side_action_axes
+                        ? ` on ${data.undercut_summary.side_action_axes} side-action ${data.undercut_summary.side_action_axes === 1 ? 'axis' : 'axes'}`
+                        : '') +
+                      ` · ${data.undercut_faces} faces`
+                    : 'No trapped features'}
                 </div>
               </div>
               <div className="metric-card" style={{ gridColumn: 'span 2' }}>

@@ -7,7 +7,7 @@
 > and its value, every engineering decision with its rationale and the
 > evidence that triggered it, the validation history with numbers, and the
 > known limitations. Read this and you know everything the team knows.
-> Last updated: 2026-07-30.
+> Last updated: 2026-08-18.
 
 ---
 
@@ -90,8 +90,8 @@ exploded core/cavity view, parting line rendering, direction override panel).
 ## 3. EVALUATION INPUTS (what the judges told us, with sources)
 
 ### 3.1 Phase 1 scoresheet & mentor feedback
-Source: `mentor_feedback_report.md` (in repo root) + the results-call
-recording.
+Source: the Phase 1 results-call recording (mentor feedback summary removed
+from the repo).
 
 Phase 1 criteria (0/1/2 each): optimal mold direction detection; ability to
 override mold direction; main parting line creation; core & cavity
@@ -172,28 +172,31 @@ dfm-agent/
 ├── api.py                     # FastAPI app: POST /analyze (file + optional direction)
 ├── app.sh / stop.sh           # start/stop backend (uvicorn :8000) + frontend (vite :5173)
 ├── requirements.txt           # fastapi, uvicorn, cadquery (brings OCP), numpy...
-├── mentor_feedback_report.md  # Phase 1 feedback summary (source doc)
 ├── assets/
 │   ├── Part1.stp              # Phase 1 packaging cap, 311 faces
 │   ├── Part3.stp              # Phase 2 part ("Part2" in STEP header), 414 faces, NX 2412
-│   └── cupshot_in_bus_v2.STEP # GrabCAD cup holder (mentor-suggested validation), 56 faces
+│   └── GrabCAD validation parts are large third-party downloads; not tracked
 ├── core/
 │   ├── models.py              # FaceData / DirectionCandidate / AnalysisResult + score
 │   ├── step_parser.py         # STEP → FaceData list (+ multi-point surface sampling)
 │   ├── undercut_detector.py   # UndercutRaycaster + per-sample trapped logic
+│   ├── undercut_regions.py    # group trapped faces into side-action regions + mechanism
 │   ├── mold_direction.py      # axis sweep, area ranking, pruning, sign selection
 │   ├── draft_angle.py         # worst-case draft per face
-│   ├── face_classifier.py     # core/cavity/undercut assignment
+│   ├── face_classifier.py     # core/cavity/undercut assignment (+ per-region resolution of ambiguous walls)
+│   ├── silhouette.py          # split faces at the silhouette for perpendicular (clamshell) pulls
 │   ├── parting_line.py        # boundary edges → chained loops → primary loop
 │   └── analyzer.py            # orchestrates the whole pipeline
 ├── scripts/analyze_cli.py     # headless regression harness (run this after ANY change)
 ├── frontend/src/App.jsx       # metrics sidebar, override panel, upload
 ├── frontend/src/ModelViewer.jsx # three.js scene: face meshes, exploded view, PL lines
+├── app.bat / app.ps1 / stop.* # same one-click start/stop for Windows
 └── docs/
     ├── technical-document.md      # METHODOLOGY REPORT (algorithms + 4 flowcharts) — deliverable
     ├── product-document.md        # product/feature description
     ├── decision-log.md            # architectural decision record
     ├── product-walkthrough.md     # demo script
+    ├── untillnow.md               # flat-parting-line fix write-up (Part 1, 2026-08-17)
     └── meeting-notes-2026-07-28.md # full Phase 2 Q&A notes (source doc)
 ```
 
@@ -743,11 +746,11 @@ the kind of feature the judges' nozzle example says needs a side core.
   within **0.16 %** of exact π r².
 - **Synthetic cap with lateral hole** (ø50 × 30 mm, ø8 side hole): exactly
   the 2 hole-wall half-cylinders flagged as undercuts; rim loop correct.
-- These are encoded in a **29-test suite** under `tests/` that gates every
+- These are encoded in a **33-test suite** under `tests/` that gates every
   algorithm change: `test_synthetic.py` (24 tests over cadquery parts with
-  construction-known answers) and `test_parting_line_topology.py` (5 tests
-  asserting the primary loop is a single closed **planar** loop). Current
-  status: **29/29 PASS**. An earlier inline 9-assertion script referenced
+  construction-known answers) and `test_parting_line_topology.py` (9 tests
+  asserting the primary loop is a single closed **planar** loop, plus the O-ring
+  nozzle clamshell case). Current status: **32 PASS / 1 skipped**. An earlier inline 9-assertion script referenced
   here no longer exists — it was deleted in commit 719320d and never
   replaced until this suite.
 
@@ -761,15 +764,18 @@ parse 1.1 s · raycaster build 0.0 s · winning axis eval ~4 s · losing axes
 ## 9. KNOWN LIMITATIONS & OPEN WORK (be honest if asked)
 
 1. **Side core / lifter PL generation** not implemented (deliberately — not
-   evaluated this round). The 88 Part 3 undercut faces are detected and
-   visualized but not clustered into side-action regions with pull vectors.
+   evaluated this round). The 88 Part 3 undercut faces ARE grouped into
+   side-action regions with a retraction axis and mechanism
+   (`core/undercut_regions.py`: 2 regions, 1 axis, side-action slider) and shown
+   in the UI; the side-core parting surface itself is not generated.
 2. **Part 3 shows 6 PL candidate loops** (1 primary + 5 feature loops at the
    snap legs). The primary is correct; the extras are real core/cavity
    transitions around undercut regions — arguably features, but a cleaner
    story would merge/suppress loops around undercut faces.
-3. **No silhouette splitting**: a parting line crossing the MIDDLE of a tall
-   vertical face (not along existing edges) can't be found — we only use
-   existing B-rep edges. Real mold tools split faces at the silhouette curve.
+3. **Silhouette splitting is limited**: `core/silhouette.py` splits faces at the
+   silhouette only for pulls perpendicular to a surface-of-revolution axis (the
+   clamshell case). A parting line crossing the MIDDLE of a freeform or
+   spherical face (no B-rep edge on it) is still not found.
 4. Performance is single-core Python; scaling path (per our roadmap):
    multiprocess the per-face rays, batch/BVH raycasting (e.g. embree on a
    fine mesh for the sweep, exact B-rep for the winner), cache by file hash.
@@ -827,5 +833,5 @@ parse 1.1 s · raycaster build 0.0 s · winning axis eval ~4 s · losing axes
 ---
 *End of context file. Companion documents: `docs/technical-document.md`
 (methodology + flowcharts), `docs/meeting-notes-2026-07-28.md` (full Q&A),
-`mentor_feedback_report.md` (Phase 1 feedback), `docs/decision-log.md`
-(ADR-style log), `docs/product-document.md` (product view).*
+`docs/decision-log.md` (ADR-style log), `docs/product-document.md` (product
+view).*

@@ -240,8 +240,8 @@ z = 2.03, about 2 mm high. These files are large third-party downloads and are
 not tracked in the repo.
 
 Synthetic parts are generated with known ground truth (cadquery) and asserted
-in a **29-test** suite that gates every algorithm change: 24 in
-`tests/test_synthetic.py` (construction-known answers) plus 5 in
+in a **33-test** suite that gates every algorithm change: 24 in
+`tests/test_synthetic.py` (construction-known answers) plus 9 in
 `tests/test_parting_line_topology.py`, which assert the primary loop is a
 single closed **planar** loop. The planarity assertion exists because its
 absence let Part 1's parting line regress from a flat rim to a meandering

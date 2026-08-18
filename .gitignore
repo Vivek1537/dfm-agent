@@ -222,3 +222,4 @@ __marimo__/
 
 # local Claude Code config
 .claude/
+.venv-win/
