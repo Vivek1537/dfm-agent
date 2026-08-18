@@ -10,6 +10,10 @@ function App() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [candidates, setCandidates] = useState([]);   // from the auto-search run
   const [customDir, setCustomDir] = useState('');
+  // Exact per-direction undercut figures arrive after the main result: the
+  // full axis sweep is the slow part of the pipeline and only feeds this
+  // panel, so it must not hold up the 3D view.
+  const [ranking, setRanking] = useState('idle');     // idle | loading | done
   const fileInputRef = useRef(null);
 
   const analyze = async (file, direction = null) => {
@@ -27,11 +31,36 @@ function App() {
       setData(response.data);
       // Keep the ranked candidate list from the automatic search so the
       // user can compare directions even after overriding.
-      if (!direction) setCandidates(response.data.direction_candidates || []);
+      if (!direction) {
+        setCandidates(response.data.direction_candidates || []);
+        refineRanking(file);
+      }
     } catch (err) {
       setError(err.response?.data?.detail || err.message || 'Failed to analyze part.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Second pass: exact undercut counts for every candidate direction. The
+  // first response only carries lower bounds for the losing axes (">=N"),
+  // which cannot be compared against each other, so this replaces them once
+  // the full sweep finishes. Failure is non-fatal — the bounds simply stay.
+  const refineRanking = async (file) => {
+    setRanking('loading');
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await axios.post('/api/analyze/directions', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      if (res.data?.direction_candidates?.length) {
+        setCandidates(res.data.direction_candidates);
+      }
+    } catch {
+      // keep the lower-bound list
+    } finally {
+      setRanking('done');
     }
   };
 
@@ -55,8 +84,6 @@ function App() {
     await analyze(selectedFile, parts);
   };
 
-<<<<<<< Updated upstream
-=======
   // The backend returns the primary loop first, then any further CLOSED
   // loops. Report the PRIMARY one: the deliverable is a single continuous
   // parting line, so showing a candidate count as "loops" reads as though we
@@ -82,7 +109,6 @@ function App() {
   const hasDelegation = requiredActions.length > 0;
   const alternatives = data?.alternatives || [];
 
->>>>>>> Stashed changes
   const formatDirection = (label) => {
     let Icon = null;
     if (label.includes('Z+')) Icon = <ArrowUp size={16} />;
@@ -108,9 +134,12 @@ function App() {
         </div>
 
         {data ? (
-          <div
+          <button
+            type="button"
             onClick={() => fileInputRef.current.click()}
             style={{
+              font: 'inherit',
+              color: 'inherit',
               padding: '0.75rem',
               background: 'rgba(255,255,255,0.05)',
               border: '1px solid var(--glass-border)',
@@ -125,18 +154,24 @@ function App() {
             }}
           >
             <UploadCloud size={16} /> Upload New Part
-            <input type="file" ref={fileInputRef} accept=".stp,.step" onChange={handleFileUpload} style={{display:'none'}} />
-          </div>
+          </button>
         ) : (
-          <div className="file-upload" onClick={() => fileInputRef.current.click()}>
+          <button type="button" className="file-upload" onClick={() => fileInputRef.current.click()}>
             <UploadCloud color="var(--primary)" size={48} style={{ marginBottom: '1rem' }} />
             <h3>Upload CAD Part</h3>
             <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginTop: '0.5rem' }}>
               Drag & drop or click to upload a .stp file
             </p>
-            <input type="file" ref={fileInputRef} accept=".stp,.step" onChange={handleFileUpload} style={{display:'none'}} />
-          </div>
+          </button>
         )}
+        <input
+          type="file"
+          ref={fileInputRef}
+          accept=".stp,.step"
+          onChange={handleFileUpload}
+          style={{ display: 'none' }}
+          aria-label="Upload CAD file"
+        />
 
         {error && (
           <div style={{ color: '#ef4444', background: 'rgba(239, 68, 68, 0.1)', padding: '1rem', borderRadius: '8px', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -194,14 +229,8 @@ function App() {
                 </div>
               </div>
               <div className="metric-card" style={{ gridColumn: 'span 2' }}>
-                <div className="metric-label">Parting Lines</div>
+                <div className="metric-label">Main Parting Line</div>
                 <div className="metric-value" style={{ color: '#00ffff', fontSize: '1.25rem' }}>
-<<<<<<< Updated upstream
-                  {data.geometry?.parting_line_loops || 0} loops <span style={{fontSize: '0.875rem', color: '#94a3b8'}}>({data.geometry?.parting_lines?.[0]?.segments?.length || 0} edges)</span>
-                </div>
-                <div className="metric-subtext">
-                  {data.geometry?.parting_line_is_ambiguous ? '⚠️ Multiple candidates (ambiguous)' : 'Continuous partition loop'}
-=======
                   {primaryLoop
                     ? `1 ${primaryLoop.is_closed === false ? 'open chain' : 'closed loop'}`
                     : 'Not found'}
@@ -235,7 +264,6 @@ function App() {
                       shutoff, not main parting line
                     </div>
                   )}
->>>>>>> Stashed changes
                 </div>
                 {/* Failed checks, listed explicitly. Confidence is capped by
                     these rather than averaged with them, so a low number here
@@ -260,6 +288,18 @@ function App() {
               <p style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.75rem' }}>
                 Override the pull direction (e.g., to move flash off cosmetic surfaces).
               </p>
+              {ranking === 'loading' && (
+                <div
+                  aria-live="polite"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                    fontSize: '0.75rem', color: '#60a5fa', marginBottom: '0.5rem',
+                  }}
+                >
+                  <span className="mini-spinner" aria-hidden="true" />
+                  Ranking all directions…
+                </div>
+              )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 {candidates.slice(0, 6).map((c) => {
                   const isActive = !data.is_override && c.label === data.best_direction_label;
@@ -291,10 +331,13 @@ function App() {
                   value={customDir}
                   onChange={(e) => setCustomDir(e.target.value)}
                   placeholder="custom: x,y,z"
+                  aria-label="Custom mold pull direction"
+                  autoComplete="off"
+                  name="custom-direction"
                   style={{
                     flex: 1, padding: '0.4rem 0.6rem', borderRadius: '6px',
                     background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)',
-                    color: '#e2e8f0', fontSize: '0.8rem', outline: 'none',
+                    color: '#e2e8f0', fontSize: '0.8rem',
                   }}
                 />
                 <button
@@ -517,22 +560,50 @@ function App() {
             )}
 
             <div style={{ marginTop: '1rem' }}>
-              <h3 style={{ fontSize: '1rem', marginBottom: '1rem', color: '#e2e8f0' }}>Face Classification</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.875rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94a3b8' }}>Core Faces</span>
-                  <span>{data.core_faces}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94a3b8' }}>Cavity Faces</span>
-                  <span>{data.cavity_faces}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontSize: '1rem', marginBottom: '0.25rem', color: '#e2e8f0' }}>Surface Split</h3>
+              <p style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: '0.75rem' }}>
+                Share of part surface area formed by each mold half.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.875rem' }}>
+                {[
+                  { key: 'core', label: 'Core', color: '#60a5fa', count: data.core_faces },
+                  { key: 'cavity', label: 'Cavity', color: '#fbbf24', count: data.cavity_faces },
+                  { key: 'undercut', label: 'Undercut', color: '#ef4444', count: data.undercut_faces },
+                ].map(({ key, label, color, count }) => {
+                  const total = data.areas?.total || 0;
+                  const area = data.areas?.[key] || 0;
+                  const pct = total > 0 ? (100 * area) / total : 0;
+                  return (
+                    <div key={key}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        <span style={{ color: '#94a3b8' }}>{label}</span>
+                        <span>
+                          <strong style={{ color, fontVariantNumeric: 'tabular-nums' }}>{pct.toFixed(1)}%</strong>
+                          <span style={{ fontSize: '0.75rem', color: '#64748b' }}> · {count} faces</span>
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          height: '4px', marginTop: '4px', borderRadius: '2px',
+                          background: 'rgba(255,255,255,0.06)', overflow: 'hidden',
+                        }}
+                      >
+                        <div style={{ width: `${pct}%`, height: '100%', background: color }} />
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <span style={{ color: '#94a3b8' }}>Warning Faces</span>
+                    <span style={{ color: '#94a3b8' }}>Low draft</span>
                     <span style={{ fontSize: '10px', color: '#64748b' }}>(Draft angle &lt; 1°)</span>
                   </div>
-                  <span style={{ color: '#f59e0b' }}>{data.warning_faces}</span>
+                  <span style={{ color: '#f59e0b', fontVariantNumeric: 'tabular-nums' }}>
+                    {data.areas?.total
+                      ? `${((100 * (data.areas.warning || 0)) / data.areas.total).toFixed(1)}%`
+                      : '—'}
+                    <span style={{ fontSize: '0.75rem', color: '#64748b' }}> · {data.warning_faces} faces</span>
+                  </span>
                 </div>
               </div>
             </div>

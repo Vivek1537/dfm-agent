@@ -7,14 +7,11 @@ import cadquery as cq
 
 from core.analyzer import analyze_part
 from core.parting_line import compute_parting_line_result
-<<<<<<< Updated upstream
-=======
 from core.step_parser import parse_step
 from core.undercut_detector import UndercutRaycaster
 from core.mold_direction import find_best_mold_direction
 from core.undercut_regions import summarize_regions
 from core.delegation import EMPTY_PLAN, load_plan
->>>>>>> Stashed changes
 
 app = FastAPI(title="DfM API")
 
@@ -84,7 +81,7 @@ app.add_middleware(
 )
 
 @app.post("/analyze")
-async def analyze_endpoint(
+def analyze_endpoint(
     file: UploadFile = File(...),
     debug: bool = False,
     direction: str = Form(None),
@@ -94,6 +91,11 @@ async def analyze_endpoint(
     `direction` (optional): override mold pull direction as "x,y,z".
     When provided, the automatic direction search is skipped and the whole
     analysis is computed for the given direction.
+
+    Declared sync on purpose: the geometry work is CPU-bound and blocking, so
+    as an `async def` it would occupy the event loop and stall every other
+    request. A plain `def` is handed to FastAPI's threadpool instead, which
+    keeps an override responsive while a direction-ranking pass is running.
     """
     override = None
     if direction:
@@ -109,16 +111,12 @@ async def analyze_endpoint(
             )
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".stp") as tmp_file:
-        content = await file.read()
-        tmp_file.write(content)
+        tmp_file.write(file.file.read())
         tmp_filepath = tmp_file.name
 
     try:
         # Run backend logic
         try:
-<<<<<<< Updated upstream
-            result = analyze_part(tmp_filepath, file.filename, override_direction=override)
-=======
             # Fast path: pruning finds the same winning direction ~5x quicker,
             # so the part renders promptly. The losing candidates come back as
             # lower bounds; the client fills in exact figures via
@@ -130,7 +128,6 @@ async def analyze_endpoint(
                 exact_candidates=False,
                 tooling_plan=_plan_for_upload(file.filename),
             )
->>>>>>> Stashed changes
         except (RuntimeError, ValueError) as e:
             return JSONResponse(status_code=400, content={"detail": f"Invalid CAD file: {str(e)}"})
 
@@ -252,8 +249,6 @@ async def analyze_endpoint(
             "cavity_faces": result.cavity_face_count,
             "undercut_faces": result.undercut_face_count,
             "warning_faces": result.warning_face_count,
-<<<<<<< Updated upstream
-=======
             # Surface area per class. Report these ahead of the counts: a face
             # count reflects CAD subdivision, area reflects how the part
             # actually divides between the mold halves.
@@ -300,7 +295,6 @@ async def analyze_endpoint(
             # Present so the choice is visible rather than asserted: once side
             # actions are allowed, trapped area alone stops discriminating.
             "alternatives": result.alternatives,
->>>>>>> Stashed changes
             "best_direction": result.best_mold_direction,
             "best_direction_label": result.best_direction_label or str(result.best_mold_direction),
             "is_override": result.is_override,
@@ -334,8 +328,6 @@ async def analyze_endpoint(
     finally:
         os.unlink(tmp_filepath)
 
-<<<<<<< Updated upstream
-=======
 
 @app.post("/analyze/directions")
 def directions_endpoint(file: UploadFile = File(...)):
@@ -384,4 +376,3 @@ def directions_endpoint(file: UploadFile = File(...)):
     finally:
         os.unlink(tmp_filepath)
 
->>>>>>> Stashed changes

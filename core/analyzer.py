@@ -39,20 +39,6 @@ from core.mold_direction import find_best_mold_direction
 # parameter must keep that spelling because callers pass it by keyword.
 from core.pull_direction import override_direction as make_override_direction
 from core.draft_angle import compute_draft_angles
-<<<<<<< Updated upstream
-from core.face_classifier import classify_faces, build_analysis_result
-from core.parting_line import find_parting_line
-
-
-def _normalize(v: Tuple[float, float, float]) -> Tuple[float, float, float]:
-    mag = math.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2)
-    if mag < 1e-9:
-        raise ValueError("Override direction must be a non-zero vector.")
-    return (v[0] / mag, v[1] / mag, v[2] / mag)
-
-
-def analyze_part(filepath: str, part_name: str, override_direction: Optional[Tuple[float, float, float]] = None) -> AnalysisResult:
-=======
 from core.face_classifier import classify_mold_regions, build_analysis_result
 from core.parting_line import find_all_parting_lines
 from core.tolerances import AnalysisConfig, resolve
@@ -67,15 +53,9 @@ def analyze_part(
     config: Optional[AnalysisConfig] = None,
     tooling_plan: Optional[ToolingPlan] = None,
 ) -> AnalysisResult:
->>>>>>> Stashed changes
     """
     Run the full DfM analysis on a STEP file.
 
-<<<<<<< Updated upstream
-    If `override_direction` is provided, the expensive multi-axis search is
-    skipped entirely and the analysis (undercuts, draft, classification,
-    parting line, score) is computed for that direction only.
-=======
     If an override direction is provided, the expensive multi-axis search is
     skipped entirely and the analysis (accessibility, undercuts, draft,
     classification, parting line, score) is computed for that direction only.
@@ -85,7 +65,6 @@ def analyze_part(
     candidates come back with lower-bound counts instead of exact ones. The
     API uses the fast path so the part renders quickly, then fills in the
     exact ranking from a follow-up request.
->>>>>>> Stashed changes
     """
     cfg = resolve(config)
     override = override_direction
@@ -114,13 +93,6 @@ def analyze_part(
         access = analyzer.analyze(direction_to_use)
         analyzer.apply_to_faces(access)
 
-<<<<<<< Updated upstream
-    if override_direction:
-        # 2a. User-chosen direction (e.g., flash placement, cosmetic surfaces)
-        direction_to_use = _normalize(override_direction)
-        evaluate_direction(raycaster, faces, direction_to_use)
-=======
->>>>>>> Stashed changes
         best_candidate = DirectionCandidate(
             direction=direction_to_use,
             label=pull.label,
@@ -131,16 +103,11 @@ def analyze_part(
         best_candidate.accessibility = access
         all_candidates = [best_candidate]
     else:
-<<<<<<< Updated upstream
-        # 2b. Full search over fixed + geometry-derived axes
-        best_candidate, all_candidates = find_best_mold_direction(faces, raycaster)
-=======
         # 2b. Full search over fixed + geometry-derived axes.
         best_candidate, all_candidates = find_best_mold_direction(
             faces, analyzer.raycaster, exact_candidates=exact_candidates,
             config=cfg, analyzer=analyzer, shape=shape,
         )
->>>>>>> Stashed changes
         direction_to_use = best_candidate.direction
         access = best_candidate.accessibility
 
@@ -199,10 +166,6 @@ def analyze_part(
     # 7. Assemble the result.
     res = build_analysis_result(part_name, faces, best_candidate, all_candidates)
     res.raw_shape = shape
-<<<<<<< Updated upstream
-    res.parting_line_edges = pl_edges
-    res.is_override = override_direction is not None
-=======
     res.parting_line_edges = parting.primary_loop.edges
     res.parting_line = parting
     res.is_override = override is not None
@@ -213,7 +176,6 @@ def analyze_part(
     res.alternatives = _alternatives(
         faces, analyzer, all_candidates, direction_to_use, plan, shape=shape
     )
->>>>>>> Stashed changes
     return res
 
 

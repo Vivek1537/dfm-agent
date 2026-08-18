@@ -28,12 +28,6 @@
 
 | Feature | Description |
 | :--- | :--- |
-<<<<<<< Updated upstream
-| **Parse STEP & Evaluate Pull Direction** | Loads `.stp` files and automatically calculates the mathematically optimal mold pull direction. |
-| **Surface Normal & Draft Angle Analysis** | Classifies faces into Core, Cavity, Undercut, and Warning categories with draft angle evaluation against the resolved mold-pull direction. |
-| **Propose Core–Cavity Split** | Generates highly accurate 3D parting line loops to define the core and cavity separation. |
-| **Clear 3D Visualization** | A rich React + Three.js frontend to visualize analysis results directly in your browser. |
-=======
 | **Parse STEP & Evaluate Pull Direction** | Loads `.stp` files and finds the optimal mold pull direction. Candidates come from global axes, 45° diagonals, cylinder/cone feature axes, dominant planar normals and principal axes; selection is lexicographic, so a tidier parting line can never outrank fewer undercuts. |
 | **Ray-Based Undercut Detection** | Every face is probed along **+D and −D** from a grid of surface samples. A face is trapped when the half that *forms* it cannot pull away from it — not merely when its normal points the wrong way. |
 | **Surface Normal & Draft Angle Analysis** | Classifies faces into Core, Cavity, Undercut and Warning, reconciled against accessibility and propagated over topology so fillets inherit their neighbours. |
@@ -41,7 +35,6 @@
 | **Honest Validation** | Topological, geometric and mold checks with a confidence that is **capped by failures, never averaged with them**. A part needing a slider says so and names the mechanism. |
 | **Declared Tooling Plans** | A part may declare feature groups formed by side cores or lifters (`assets/<Part>.tooling.json`). Those faces leave the main halves' books — and the required actions are reported beside the undercut count, never instead of it. |
 | **Clear 3D Visualization** | React + Three.js viewer: continuous parting loops, pull-direction arrow, colour-coded core/cavity/undercut faces, exploded view, plus Required Tooling and Alternative Configurations panels. |
->>>>>>> Stashed changes
 
 <br />
 
@@ -141,13 +134,6 @@ This cleanly shuts down both servers, including all of their child processes. If
 
 ## Inputs & Outputs
 
-<<<<<<< Updated upstream
-- **Input:** industry-standard CAD files (`.stp` / `.step`). A sample part is included in `assets/`.
-- **Output:** an interactive browser-based 3D evaluation — manufacturability score, face classification, best pull direction (with manual override), and parting lines.
-
-<br />
-
-=======
 - **Input:** industry-standard CAD files (`.stp` / `.step`). Two reference parts are included in `assets/` (`Part1.stp`, `Part3.stp`).
 - **Output:** an interactive browser-based 3D evaluation — manufacturability score, face classification, best pull direction (with manual override), parting loops, undercut regions with recommended tooling, and a validation report.
 
@@ -297,7 +283,6 @@ Those files are large third-party downloads and are not tracked here.
 
 <br />
 
->>>>>>> Stashed changes
 ## Project Architecture
 
 ```text
@@ -306,11 +291,7 @@ dfm-agent/
 ├── core/            # DfM logic: pull direction, accessibility, classification
 │   └── parting/     # region boundaries, loop tracing, silhouette, validation
 ├── frontend/        # React/Vite UI & Three.js viewer
-<<<<<<< Updated upstream
-├── tests/           # Backend unit tests
-=======
 ├── tests/           # 103 tests: ground truth, pull direction, parting pipeline, delegation
->>>>>>> Stashed changes
 ├── app.sh           # One-click start for macOS / Linux
 ├── stop.sh          # One-click stop for macOS / Linux
 ├── app.bat          # One-click start for Windows (double-click this)

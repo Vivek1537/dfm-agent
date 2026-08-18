@@ -315,13 +315,6 @@ def _measure_winner(
 def find_best_mold_direction(
     faces: List[FaceData],
     raycaster: Optional[UndercutRaycaster] = None,
-<<<<<<< Updated upstream
-) -> Tuple[DirectionCandidate, List[DirectionCandidate]]:
-    """
-    Search all candidate axes (fixed + geometry-derived) for the direction
-    with the fewest trapped faces. Returns (best, all_candidates) and leaves
-    `faces` fully evaluated (all samples) for the best direction.
-=======
     exact_candidates: bool = True,
     config: Optional[AnalysisConfig] = None,
     analyzer: Optional[AccessibilityAnalyzer] = None,
@@ -344,7 +337,6 @@ def find_best_mold_direction(
     directions is the point of this panel, the exact numbers are worth the
     extra time; reducing sample density instead is NOT a valid trade, as it
     measurably reorders the ranking.
->>>>>>> Stashed changes
     """
     cfg = resolve(config)
     if analyzer is None:
@@ -357,45 +349,8 @@ def find_best_mold_direction(
     )
     best_eval = select_best_direction(evaluations)
 
-<<<<<<< Updated upstream
-    candidates: List[DirectionCandidate] = []
-    best_area_so_far: Optional[float] = None
-    best_snapshot: Optional[List[Tuple[bool, float]]] = None
-
-    for axis, axis_label in axes:
-        undercut_count, undercut_area = evaluate_direction(
-            raycaster, faces, axis,
-            max_samples_per_face=SWEEP_SAMPLES_PER_FACE,
-            abort_above_area=best_area_so_far,
-        )
-        if best_area_so_far is None or undercut_area < best_area_so_far:
-            best_area_so_far = undercut_area
-            # Snapshot per-face verdicts of the incumbent best axis so we
-            # don't have to re-run the whole sweep for the winner later.
-            best_snapshot = [(f.is_undercut, f.trapped_fraction) for f in faces]
-
-        sign = _pick_sign(faces, axis)
-        direction = (axis[0] * sign, axis[1] * sign, axis[2] * sign)
-
-        candidates.append(DirectionCandidate(
-            direction=direction,
-            label=_axis_label_to_direction_label(axis_label, sign),
-            undercut_count=undercut_count,
-            undercut_area=undercut_area,
-            pruned=(
-                best_area_so_far is not None
-                and undercut_area > best_area_so_far
-            ),
-        ))
-
-    # Judges' guidance (2026-07-28): rank by undercut AREA first — a face
-    # split into several small patches shouldn't outrank one large trapped
-    # face. Count is the tie-break.
-    candidates.sort(key=lambda c: (c.undercut_area, c.undercut_count))
-=======
     candidates = [_to_candidate(ev, faces) for ev in evaluations]
     best = candidates[evaluations.index(best_eval)]
->>>>>>> Stashed changes
 
     # Refine the WINNER's pull sign using internal-feature analysis (the
     # sweep uses a cheap area heuristic; sign doesn't affect undercuts,
@@ -407,18 +362,6 @@ def find_best_mold_direction(
         best.label = _flip_direction_label(best.label)
         best.direction = refined_dir
 
-<<<<<<< Updated upstream
-    # Restore the winner's sweep verdicts, then re-check at full sample
-    # resolution ONLY the faces that showed any trapping (huge speedup on
-    # parts where most faces are free).
-    if best_snapshot is not None:
-        for f, (uc, frac) in zip(faces, best_snapshot):
-            f.is_undercut = uc
-            f.trapped_fraction = frac
-        refine_direction(raycaster, faces, best.direction)
-    else:
-        evaluate_direction(raycaster, faces, best.direction)
-=======
     # Re-measure the winner and stamp its verdicts onto the faces. The sweep
     # ran on a reduced sample set and measured only the release verdict, so
     # its trapped fractions are a ranking signal, not a reportable confidence.
@@ -429,6 +372,5 @@ def find_best_mold_direction(
     best.pruned = False
     best.evaluation = evaluate_pull_direction(best_eval.direction, final, adjacency)
     best.accessibility = final
->>>>>>> Stashed changes
 
     return best, candidates

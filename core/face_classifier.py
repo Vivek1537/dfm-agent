@@ -537,6 +537,15 @@ def build_analysis_result(
         cavity_face_count=sum(1 for f in faces if f.classification == "cavity"),
         undercut_face_count=sum(1 for f in faces if f.classification == "undercut"),
         warning_face_count=sum(1 for f in faces if f.low_draft and not f.is_undercut),
+        # Areas use the same predicates as the counts above, so the two can
+        # never disagree. Report area ahead of count in the UI: a face count
+        # reflects how the CAD kernel happened to subdivide the surface, area
+        # reflects how the part actually divides between the mold halves.
+        core_area=sum(f.area for f in faces if f.classification == "core"),
+        cavity_area=sum(f.area for f in faces if f.classification == "cavity"),
+        undercut_area=sum(f.area for f in faces if f.classification == "undercut"),
+        warning_area=sum(f.area for f in faces if f.low_draft and not f.is_undercut),
+        total_area=sum(f.area for f in faces),
         manufacturability_score=compute_score(faces),
     )
 

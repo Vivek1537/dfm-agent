@@ -145,8 +145,6 @@ def test_synthetic_cup_outer_wall_stays_cavity():
     assert outer_wall.mold_half == "cavity", "convex outer wall must be cavity"
     assert inner_wall.mold_half == "core", "concave inner wall must be core"
     assert result.undercut_face_count == 0
-<<<<<<< Updated upstream
-=======
 
 
 # --------------------------------------------------------------- area totals
@@ -289,4 +287,3 @@ def test_nozzle_reports_the_bore_as_a_side_action_not_as_solved():
     assert parting.confidence <= 0.85, (
         f"confidence {parting.confidence} is not capped by the undercut failure"
     )
->>>>>>> Stashed changes

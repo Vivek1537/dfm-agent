@@ -533,15 +533,6 @@ usually easier to fix than twenty scattered ones.
 
 Reference results (WSL2, single core, includes STEP parse):
 
-<<<<<<< Updated upstream
-| Part | Faces | Best pull | Undercuts | Core/Cavity | Primary PL | Time |
-|---|---|---|---|---|---|---|
-| Part 1 (Phase 1 cap) | 311 | Z+ | **0** (= judges' answer) | 261 / 50 | closed rim, 32 edges | ~2 s |
-| Part 2 / Part3.stp (Phase 2) | 414 | Z− | 88 (genuine side-action clips) | 322 / 4 | closed outer rim 36×36 @ z=1 | ~14 s |
-| GrabCAD cup holder | 56 | Z− | 8 (snap-clip clusters) | 42 / 6 | closed rim 101×100 | ~1 s |
-| Synthetic cup (ø60×80, 3 mm wall) | 5 | Z− | 0 | inner=core, outer=cavity | rim, area err 0.16 % | <0.1 s |
-| Synthetic cap + lateral hole | 7 | Z− | exactly the 2 hole walls | correct | closed rim | <0.1 s |
-=======
 | Part | Faces | Best pull | Undercuts | Primary parting line | Valid | Conf. | Time |
 |---|---|---|---|---|---|---|---|
 | Part 1 (Phase 1 cap) | 311 | Z+ | **0** (= judges' answer) | planar closed rim, 8 edges @ z=15 | ✓ | 0.898 | 1.5 s |
@@ -564,12 +555,8 @@ rib pockets that need side action, which no parting line can solve. The
 nozzle's loop only *closes* because a side core forms its bore, and 40 mm of
 its length is reported as shutoff rather than counted as parting line. Neither
 is reported as solved, and both confidences are capped by the failure.
->>>>>>> Stashed changes
 
 Synthetic parts are generated with known ground truth (cadquery) and asserted
-<<<<<<< Updated upstream
-in a 9-point regression suite that gates every algorithm change.
-=======
 in an **86-test** suite that gates every algorithm change:
 
 | File | Tests | What it pins down |
@@ -606,4 +593,3 @@ It releases **all 88** — the two undercut sets are entirely disjoint — but
 traps the through-bore (face 35, 1432.6 mm², more than the entire axial set)
 and the splines (589.7 mm²) instead, for **2080.0 mm² against 1366.8 mm²**.
 Axial Z− with two opposed sliders is the correct answer.
->>>>>>> Stashed changes

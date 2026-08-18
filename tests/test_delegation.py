@@ -230,9 +230,27 @@ def test_alternatives_always_include_an_axial_option():
     assert a["undercut_count"] == 88
     assert abs(a["undercut_area"] - 1366.8) < 1.0
     assert a["would_need_further_actions"] is True
-    # The axial pull leaves markedly less on the main halves once the
-    # clamshell's groups are delegated — that contrast is the point.
-    assert a["main_half_fraction"] < 0.5
+
+    # The axial pull needs NEITHER of the declared groups — it draws the bore
+    # and the splined end cleanly, which is exactly why it is worth keeping in
+    # view. Whether a configuration needs the plan is measured per direction,
+    # not inherited from the primary.
+    assert a["needs_declared_plan"] is False
+    assert a["extra_action_axes"] == 0
+    assert a["main_half_fraction"] > 0.8, (
+        f"axial coverage {a['main_half_fraction']:.1%}; it forms everything "
+        f"except the slots it traps, so it should be ~82%"
+    )
+
+    # Alternative 2: the same axial pull with its OWN trapped regions
+    # delegated. Computed by the region grouper, not asserted.
+    d = a["if_delegated"]
+    assert d is not None, "the axial alternative should carry a delegated variant"
+    assert d["undercut_area"] == 0.0
+    assert d["region_count"] == 2, "the two rib-pocket regions"
+    assert d["extra_action_axes"] == 1, "opposed sliders share one axis"
+    assert "side-action slider" in d["mechanisms"]
+    assert d["main_half_fraction"] > 0.8
 
 
 @part3
