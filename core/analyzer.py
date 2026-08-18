@@ -225,18 +225,20 @@ def _alternatives(faces, analyzer, candidates, chosen, plan, shape=None):
         # alternative for the plan put the axial row at 44% when it is 82%;
         # charging none of them put the clamshell rows at 100% when they are
         # 62%. So the delegated faces are re-measured under each direction.
-        needs = _plan_area_needed_by(faces, analyzer, c.direction, plan)
-        main_half_area = total - needs - acc.undercut_area
+        # `needs` is filled in after truncation — see below. Probing the
+        # delegated faces costs a few thousand rays per direction, and at most
+        # four of the dozen candidates survive into the report.
         return {
             "label": c.label,
             "direction": [round(v, 4) for v in c.direction],
             "undercut_count": c.undercut_count,
             "undercut_area": round(c.undercut_area, 1),
-            "main_half_area": round(main_half_area, 1),
-            "main_half_fraction": round(main_half_area / total, 4),
-            "delegated_area": round(needs, 1),
-            "needs_declared_plan": needs > 0.0,
-            "extra_action_axes": axes if needs > 0.0 else 0,
+            # Provisional; corrected by _finalise() once the list is cut.
+            "main_half_area": round(total - acc.undercut_area, 1),
+            "main_half_fraction": round((total - acc.undercut_area) / total, 4),
+            "delegated_area": 0.0,
+            "needs_declared_plan": False,
+            "extra_action_axes": 0,
             "is_axial": abs(c.direction[2]) > 0.9,
             "would_need_further_actions": c.undercut_count > 0,
             "if_delegated": None,
@@ -254,6 +256,10 @@ def _alternatives(faces, analyzer, candidates, chosen, plan, shape=None):
             continue
         scored.append(entry(c, acc))
 
+    # Sorted on the provisional main_half_area, which is safe: undercut_area
+    # is the primary key, and before `needs` is known main_half_area is just
+    # `total - undercut_area` — a monotonic function of that same key. The
+    # order is therefore identical to sorting on the final figures.
     scored.sort(key=lambda a: (a["undercut_area"], -a["main_half_area"]))
     out = scored[:3]
 
@@ -262,6 +268,18 @@ def _alternatives(faces, analyzer, candidates, chosen, plan, shape=None):
         axial = [a for a in scored if a["is_axial"]]
         if axial:
             out.append(axial[0])
+
+    # Now that the list is cut, measure whether each surviving row actually
+    # needs the declared plan. Doing this before the cut probed a dozen
+    # directions to report at most four.
+    for a in out:
+        needs = _plan_area_needed_by(faces, analyzer, a["_dir"], plan)
+        a["delegated_area"] = round(needs, 1)
+        a["needs_declared_plan"] = needs > 0.0
+        a["extra_action_axes"] = axes if needs > 0.0 else 0
+        main_half_area = total - needs - a["_acc"].undercut_area
+        a["main_half_area"] = round(main_half_area, 1)
+        a["main_half_fraction"] = round(main_half_area / total, 4)
 
     # Quantify the delegated variant for the best trapping alternative. Only
     # one: grouping trapped faces into regions costs ~4 s on a 414-face part,
