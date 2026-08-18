@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import axios from 'axios';
-import { UploadCloud, CheckCircle, AlertCircle, Layers, ArrowUp, ArrowDown, ArrowRight, ArrowLeft, Compass, RotateCcw } from 'lucide-react';
+import { UploadCloud, CheckCircle, AlertCircle, Layers, ArrowUp, ArrowDown, ArrowRight, ArrowLeft, Compass, RotateCcw, Wrench } from 'lucide-react';
 import ModelViewer from './ModelViewer';
 
 function App() {
@@ -10,6 +10,10 @@ function App() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [candidates, setCandidates] = useState([]);   // from the auto-search run
   const [customDir, setCustomDir] = useState('');
+  // Exact per-direction undercut figures arrive after the main result: the
+  // full axis sweep is the slow part of the pipeline and only feeds this
+  // panel, so it must not hold up the 3D view.
+  const [ranking, setRanking] = useState('idle');     // idle | loading | done
   const fileInputRef = useRef(null);
 
   const analyze = async (file, direction = null) => {
@@ -27,11 +31,36 @@ function App() {
       setData(response.data);
       // Keep the ranked candidate list from the automatic search so the
       // user can compare directions even after overriding.
-      if (!direction) setCandidates(response.data.direction_candidates || []);
+      if (!direction) {
+        setCandidates(response.data.direction_candidates || []);
+        refineRanking(file);
+      }
     } catch (err) {
       setError(err.response?.data?.detail || err.message || 'Failed to analyze part.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Second pass: exact undercut counts for every candidate direction. The
+  // first response only carries lower bounds for the losing axes (">=N"),
+  // which cannot be compared against each other, so this replaces them once
+  // the full sweep finishes. Failure is non-fatal — the bounds simply stay.
+  const refineRanking = async (file) => {
+    setRanking('loading');
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+      const res = await axios.post('/api/analyze/directions', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      if (res.data?.direction_candidates?.length) {
+        setCandidates(res.data.direction_candidates);
+      }
+    } catch {
+      // keep the lower-bound list
+    } finally {
+      setRanking('done');
     }
   };
 
@@ -55,6 +84,15 @@ function App() {
     await analyze(selectedFile, parts);
   };
 
+  // The backend returns the primary loop plus, in debug mode, the ranked
+  // alternates. Report the PRIMARY one: the deliverable is a single closed
+  // parting line, so showing the candidate count as "loops" reads as though
+  // we emitted a discontinuous line.
+  const partingLines = data?.geometry?.parting_lines || [];
+  const primaryLoop = partingLines.find((l) => l.is_primary) || partingLines[0] || null;
+  const primaryEdges = primaryLoop?.segments?.length || 0;
+  const loopCandidates = data?.geometry?.parting_line_loops || 0;
+
   const formatDirection = (label) => {
     let Icon = null;
     if (label.includes('Z+')) Icon = <ArrowUp size={16} />;
@@ -63,7 +101,7 @@ function App() {
     else if (label.includes('X-')) Icon = <ArrowLeft size={16} />;
     else if (label.includes('Y+')) Icon = <ArrowUp size={16} style={{transform: 'rotate(45deg)'}} />;
     else if (label.includes('Y-')) Icon = <ArrowDown size={16} style={{transform: 'rotate(45deg)'}} />;
-    
+
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
         {label.split(' ')[0]} axis {Icon}
@@ -80,9 +118,12 @@ function App() {
         </div>
 
         {data ? (
-          <div 
+          <button
+            type="button"
             onClick={() => fileInputRef.current.click()}
             style={{
+              font: 'inherit',
+              color: 'inherit',
               padding: '0.75rem',
               background: 'rgba(255,255,255,0.05)',
               border: '1px solid var(--glass-border)',
@@ -97,18 +138,24 @@ function App() {
             }}
           >
             <UploadCloud size={16} /> Upload New Part
-            <input type="file" ref={fileInputRef} accept=".stp,.step" onChange={handleFileUpload} style={{display:'none'}} />
-          </div>
+          </button>
         ) : (
-          <div className="file-upload" onClick={() => fileInputRef.current.click()}>
+          <button type="button" className="file-upload" onClick={() => fileInputRef.current.click()}>
             <UploadCloud color="var(--primary)" size={48} style={{ marginBottom: '1rem' }} />
             <h3>Upload CAD Part</h3>
             <p style={{ color: '#94a3b8', fontSize: '0.875rem', marginTop: '0.5rem' }}>
               Drag & drop or click to upload a .stp file
             </p>
-            <input type="file" ref={fileInputRef} accept=".stp,.step" onChange={handleFileUpload} style={{display:'none'}} />
-          </div>
+          </button>
         )}
+        <input
+          type="file"
+          ref={fileInputRef}
+          accept=".stp,.step"
+          onChange={handleFileUpload}
+          style={{ display: 'none' }}
+          aria-label="Upload CAD file"
+        />
 
         {error && (
           <div style={{ color: '#ef4444', background: 'rgba(239, 68, 68, 0.1)', padding: '1rem', borderRadius: '8px', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -146,19 +193,36 @@ function App() {
               <div className="metric-card">
                 <div className="metric-label">Undercuts</div>
                 <div className="metric-value" style={{ color: data.undercut_faces > 0 ? '#ef4444' : '#10b981' }}>
-                  {data.undercut_faces}
+                  {/* Headline the physical FEATURE count (side-action regions), not the
+                      B-rep face count: one groove arrives as dozens of fillet slivers. */}
+                  {data.undercut_regions?.length ?? (data.undercut_faces > 0 ? 1 : 0)}
                 </div>
                 <div className="metric-subtext">
-                  Faces trapped in mold
+                  {data.undercut_faces > 0
+                    ? `${data.undercut_regions?.length === 1 ? 'region' : 'regions'}` +
+                      (data.undercut_summary?.side_action_axes
+                        ? ` on ${data.undercut_summary.side_action_axes} side-action ${data.undercut_summary.side_action_axes === 1 ? 'axis' : 'axes'}`
+                        : '') +
+                      ` · ${data.undercut_faces} faces`
+                    : 'No trapped features'}
                 </div>
               </div>
               <div className="metric-card" style={{ gridColumn: 'span 2' }}>
-                <div className="metric-label">Parting Lines</div>
+                <div className="metric-label">Main Parting Line</div>
                 <div className="metric-value" style={{ color: '#00ffff', fontSize: '1.25rem' }}>
-                  {data.geometry?.parting_line_loops || 0} loops <span style={{fontSize: '0.875rem', color: '#94a3b8'}}>({data.geometry?.parting_lines?.[0]?.segments?.length || 0} edges)</span>
+                  {primaryLoop
+                    ? `1 ${primaryLoop.is_closed === false ? 'open chain' : 'closed loop'}`
+                    : 'Not found'}
+                  {primaryLoop && (
+                    <span style={{ fontSize: '0.875rem', color: '#94a3b8' }}> ({primaryEdges} edges)</span>
+                  )}
                 </div>
                 <div className="metric-subtext">
-                  {data.geometry?.parting_line_is_ambiguous ? '⚠️ Multiple candidates (ambiguous)' : 'Continuous partition loop'}
+                  {data.geometry?.parting_line_is_ambiguous
+                    ? '⚠️ Top candidates score within 5% — review alternates'
+                    : primaryLoop && primaryLoop.is_closed === false
+                      ? '⚠️ Not closed — cannot form a mold face'
+                      : 'Single continuous loop where core meets cavity'}
                 </div>
               </div>
             </div>
@@ -170,6 +234,18 @@ function App() {
               <p style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: '0.75rem' }}>
                 Override the pull direction (e.g., to move flash off cosmetic surfaces).
               </p>
+              {ranking === 'loading' && (
+                <div
+                  aria-live="polite"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                    fontSize: '0.75rem', color: '#60a5fa', marginBottom: '0.5rem',
+                  }}
+                >
+                  <span className="mini-spinner" aria-hidden="true" />
+                  Ranking all directions…
+                </div>
+              )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 {candidates.slice(0, 6).map((c) => {
                   const isActive = !data.is_override && c.label === data.best_direction_label;
@@ -201,10 +277,13 @@ function App() {
                   value={customDir}
                   onChange={(e) => setCustomDir(e.target.value)}
                   placeholder="custom: x,y,z"
+                  aria-label="Custom mold pull direction"
+                  autoComplete="off"
+                  name="custom-direction"
                   style={{
                     flex: 1, padding: '0.4rem 0.6rem', borderRadius: '6px',
                     background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)',
-                    color: '#e2e8f0', fontSize: '0.8rem', outline: 'none',
+                    color: '#e2e8f0', fontSize: '0.8rem',
                   }}
                 />
                 <button
@@ -235,25 +314,121 @@ function App() {
             </div>
 
             <div style={{ marginTop: '1rem' }}>
-              <h3 style={{ fontSize: '1rem', marginBottom: '1rem', color: '#e2e8f0' }}>Face Classification</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.875rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94a3b8' }}>Core Faces</span>
-                  <span>{data.core_faces}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: '#94a3b8' }}>Cavity Faces</span>
-                  <span>{data.cavity_faces}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontSize: '1rem', marginBottom: '0.25rem', color: '#e2e8f0' }}>Surface Split</h3>
+              <p style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: '0.75rem' }}>
+                Share of part surface area formed by each mold half.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.875rem' }}>
+                {[
+                  { key: 'core', label: 'Core', color: '#60a5fa', count: data.core_faces },
+                  { key: 'cavity', label: 'Cavity', color: '#fbbf24', count: data.cavity_faces },
+                  { key: 'undercut', label: 'Undercut', color: '#ef4444', count: data.undercut_faces },
+                ].map(({ key, label, color, count }) => {
+                  const total = data.areas?.total || 0;
+                  const area = data.areas?.[key] || 0;
+                  const pct = total > 0 ? (100 * area) / total : 0;
+                  return (
+                    <div key={key}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        <span style={{ color: '#94a3b8' }}>{label}</span>
+                        <span>
+                          <strong style={{ color, fontVariantNumeric: 'tabular-nums' }}>{pct.toFixed(1)}%</strong>
+                          <span style={{ fontSize: '0.75rem', color: '#64748b' }}> · {count} faces</span>
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          height: '4px', marginTop: '4px', borderRadius: '2px',
+                          background: 'rgba(255,255,255,0.06)', overflow: 'hidden',
+                        }}
+                      >
+                        <div style={{ width: `${pct}%`, height: '100%', background: color }} />
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.25rem' }}>
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <span style={{ color: '#94a3b8' }}>Warning Faces</span>
+                    <span style={{ color: '#94a3b8' }}>Low draft</span>
                     <span style={{ fontSize: '10px', color: '#64748b' }}>(Draft angle &lt; 1°)</span>
                   </div>
-                  <span style={{ color: '#f59e0b' }}>{data.warning_faces}</span>
+                  <span style={{ color: '#f59e0b', fontVariantNumeric: 'tabular-nums' }}>
+                    {data.areas?.total
+                      ? `${((100 * (data.areas.warning || 0)) / data.areas.total).toFixed(1)}%`
+                      : '—'}
+                    <span style={{ fontSize: '0.75rem', color: '#64748b' }}> · {data.warning_faces} faces</span>
+                  </span>
                 </div>
               </div>
             </div>
+
+            {/* Side cores & lifters. A face count is a topology artifact --
+                the tooling decision is made per connected region, so this
+                panel reports regions and the mechanism each one needs. */}
+            {data.undercut_regions?.length > 0 && (
+              <div style={{ marginTop: '1rem' }}>
+                <h3 style={{ fontSize: '1rem', marginBottom: '0.25rem', color: '#e2e8f0', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <Wrench size={15} /> Side Cores &amp; Lifters
+                </h3>
+                <p style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: '0.75rem' }}>
+                  {data.undercut_faces} trapped faces group into{' '}
+                  {data.undercut_regions.length} feature
+                  {data.undercut_regions.length === 1 ? '' : 's'}
+                  {data.undercut_summary?.side_action_axes
+                    ? ` on ${data.undercut_summary.side_action_axes} pull ${data.undercut_summary.side_action_axes === 1 ? 'axis' : 'axes'}`
+                    : ''}
+                  .
+                </p>
+
+                {data.undercut_summary?.multi_axis_warning && (
+                  <p style={{ fontSize: '0.7rem', color: '#f59e0b', marginBottom: '0.6rem' }}>
+                    Several distinct side-action axes — each adds a slide to the tool.
+                  </p>
+                )}
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {data.undercut_regions.map((region) => {
+                    const dir = region.side_action_direction;
+                    const pct = data.areas?.total
+                      ? (100 * region.area) / data.areas.total
+                      : 0;
+                    return (
+                      <div
+                        key={region.region_id}
+                        style={{
+                          padding: '0.6rem 0.7rem',
+                          background: 'rgba(255,255,255,0.04)',
+                          border: '1px solid var(--glass-border)',
+                          borderRadius: '6px',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem' }}>
+                          <strong style={{ fontSize: '0.8rem', color: '#f87171' }}>
+                            {region.mechanism}
+                          </strong>
+                          <span style={{ fontSize: '0.7rem', color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>
+                            {region.face_count} faces · {region.area.toFixed(1)} mm² · {pct.toFixed(1)}%
+                          </span>
+                        </div>
+                        {dir && (
+                          <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '0.3rem', fontVariantNumeric: 'tabular-nums' }}>
+                            pull ({dir.map((v) => v.toFixed(2)).join(', ')})
+                            {typeof region.angular_span_deg === 'number'
+                              ? ` · wraps ${region.angular_span_deg.toFixed(0)}°`
+                              : ''}
+                          </div>
+                        )}
+                        {region.rationale && (
+                          <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.25rem', lineHeight: 1.35 }}>
+                            {region.rationale}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
           </>
         )}

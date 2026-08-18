@@ -17,14 +17,40 @@ by the cavity steel; if only the core side reaches it, by the core. An
 internal bore is blocked toward +pull by the part's own top — so it is
 correctly formed by the core, matching the judges' cap example ("even the
 internal surface … will be formed by the core").
+
+An external vertical wall that BOTH halves can reach is genuinely ambiguous:
+physics alone does not decide it, and either assignment yields a
+manufacturable mold. Such walls are resolved last, per connected REGION, by
+minimum parting-interface length (`_resolve_ambiguous_regions`) — the mold
+principle that the core/cavity split should follow the shortest boundary
+that separates the halves.
 """
 
-from typing import List, Optional, Tuple
+import logging
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+
+from OCP.BRepAdaptor import BRepAdaptor_Curve
+from OCP.GCPnts import GCPnts_AbscissaPoint
+from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE
+from OCP.TopExp import TopExp
+from OCP.TopTools import TopTools_IndexedDataMapOfShapeListOfShape
+from OCP.TopoDS import TopoDS
 
 from core.models import FaceData, AnalysisResult, DirectionCandidate, compute_score
 from core.undercut_detector import UndercutRaycaster
 
+logger = logging.getLogger(__name__)
+
 _PERP_EPS = 0.01
+
+# Fallback when adjacency offers no discriminator (no decided neighbour, or an
+# exact tie): keep the historical convention — the cavity wraps the part's
+# cosmetic exterior and the parting line sits at the rim. This is the mentor's
+# rule for a plain shell ("convex/outer surfaces → cavity") and it is what a
+# symmetric wall (equal boundary either way) gets on both synthetic ground-truth
+# models, whose outer walls tie exactly.
+_EXTERNAL_TIE_DEFAULT = "cavity"
 
 
 def _dot(a: Tuple[float, float, float],
@@ -36,10 +62,15 @@ def classify_faces(
     faces: List[FaceData],
     mold_direction: Tuple[float, float, float],
     raycaster: Optional[UndercutRaycaster] = None,
+    shape: Any = None,
 ) -> List[FaceData]:
     """
     Assign mold_half + classification to every face.
     Requires is_undercut (raycaster) and draft_angle/low_draft (draft step).
+
+    `shape` (the parent TopoDS_Shape) enables region-level resolution of
+    genuinely ambiguous external vertical walls; without it those walls fall
+    back to `_EXTERNAL_TIE_DEFAULT`.
     """
     # Area-weighted part centroid — fallback tie-break for vertical walls
     total_area = sum(f.area for f in faces) or 1.0
@@ -49,6 +80,9 @@ def classify_faces(
 
     pull = mold_direction
     neg_pull = (-pull[0], -pull[1], -pull[2])
+
+    deferred: List[FaceData] = []
+    tie_evidence: Dict[int, Dict[str, Any]] = {}
 
     for face in faces:
         normals = face.sample_normals or [face.normal]
@@ -68,10 +102,23 @@ def classify_faces(
         elif core_w > cavity_w:
             face.mold_half = "core"
         else:
-            face.mold_half = _vertical_wall_half(
-                face, pull, neg_pull, raycaster, (cx, cy, cz)
+            evidence: Dict[str, Any] = {}
+            half = _vertical_wall_half(
+                face, pull, neg_pull, raycaster, (cx, cy, cz), evidence
             )
+            if half is None:
+                # Reachable from both halves and not internal: physics does
+                # not decide. Resolve per region once every other face is set.
+                face.mold_half = ""
+                tie_evidence[face.face_id] = evidence
+                deferred.append(face)
+            else:
+                face.mold_half = half
 
+    if deferred:
+        _resolve_ambiguous_regions(faces, deferred, shape, tie_evidence)
+
+    for face in faces:
         face.classification = "undercut" if face.is_undercut else face.mold_half
 
     return faces
@@ -83,7 +130,8 @@ def _vertical_wall_half(
     neg_pull: Tuple[float, float, float],
     raycaster: Optional[UndercutRaycaster],
     centroid: Tuple[float, float, float],
-) -> str:
+    evidence: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
     """Mold half that PHYSICALLY forms a fully vertical wall.
 
     Reachability test: cast rays from the wall's sample points along the
@@ -91,6 +139,9 @@ def _vertical_wall_half(
     (e.g. an internal bore under a closed top), the cavity steel can never
     touch this wall — the core forms it. And vice versa. Falls back to the
     centroid-side heuristic when no raycaster is available.
+
+    Returns None when the wall is external and equally reachable from both
+    halves — physics does not decide, so the caller resolves it per region.
     """
     if raycaster is not None:
         pts = face.sample_points or [face.center]
@@ -109,6 +160,13 @@ def _vertical_wall_half(
             # the opposite bore wall) belongs to an internal feature.
             if raycaster.is_blocked(p, nv, nv):
                 internal += 1
+        if evidence is not None:
+            evidence.update(
+                samples=n,
+                cav_blocked=cav_blocked,
+                core_blocked=core_blocked,
+                internal=internal,
+            )
         if cav_blocked != core_blocked:
             # Blocked toward the cavity → only the core can form it.
             return "core" if cav_blocked > core_blocked else "cavity"
@@ -116,16 +174,162 @@ def _vertical_wall_half(
             # Through-holes / internal channels: formed by a core pin
             # (judges' cap example: internal surfaces → core).
             return "core"
-        # External wall reachable from both halves: the cavity forms the
-        # part's exterior (cosmetic) skin — parting line sits at the open
-        # lip, so the whole outer wall belongs to the cavity steel.
-        return "cavity"
+        # External wall, equally reachable from both halves. Either steel
+        # could form it, so defer to the region pass.
+        return None
 
     # No raycaster: which side of the centroid it sits on
     rel = (face.center[0] - centroid[0],
            face.center[1] - centroid[1],
            face.center[2] - centroid[2])
     return "cavity" if _dot(rel, pull) >= 0 else "core"
+
+
+def _edge_length(edge: Any) -> float:
+    """Accurate edge length via Gauss integration (OCP)."""
+    try:
+        return GCPnts_AbscissaPoint.Length_s(BRepAdaptor_Curve(edge))
+    except Exception:
+        return 0.0
+
+
+def _shared_edge_lengths(
+    shape: Any, faces: List[FaceData]
+) -> Dict[int, Dict[int, float]]:
+    """{face_id: {neighbour_face_id: total shared edge length}}.
+
+    Only true B-rep adjacency counts: an edge shared by exactly two faces.
+    """
+    edge_face_map = TopTools_IndexedDataMapOfShapeListOfShape()
+    TopExp.MapShapesAndAncestors_s(shape, TopAbs_EDGE, TopAbs_FACE, edge_face_map)
+
+    face_id_of: Dict[int, int] = {
+        hash(f.face_shape): f.face_id for f in faces if f.face_shape is not None
+    }
+
+    adjacency: Dict[int, Dict[int, float]] = defaultdict(lambda: defaultdict(float))
+    for i in range(1, edge_face_map.Extent() + 1):
+        adjacent = edge_face_map.FindFromIndex(i)
+        if adjacent.Extent() != 2:
+            continue
+        a = face_id_of.get(hash(TopoDS.Face_s(adjacent.First())))
+        b = face_id_of.get(hash(TopoDS.Face_s(adjacent.Last())))
+        if a is None or b is None or a == b:
+            continue
+        length = _edge_length(TopoDS.Edge_s(edge_face_map.FindKey(i)))
+        adjacency[a][b] += length
+        adjacency[b][a] += length
+    return adjacency
+
+
+def _connected_regions(
+    member_ids: Set[int], adjacency: Dict[int, Dict[int, float]]
+) -> List[List[int]]:
+    """Group member faces into connected components over shared edges.
+
+    A physical wall is usually several faces (four planes plus four corner
+    rounds on Part 1), so ambiguity must be resolved for the whole wall at
+    once — otherwise adjacent tied faces would vote on each other and the
+    outcome would depend on traversal order. Seeds and output are sorted by
+    face_id so the grouping is reproducible.
+    """
+    regions: List[List[int]] = []
+    unassigned = set(member_ids)
+    for seed in sorted(member_ids):
+        if seed not in unassigned:
+            continue
+        stack = [seed]
+        region: List[int] = []
+        while stack:
+            current = stack.pop()
+            if current not in unassigned:
+                continue
+            unassigned.discard(current)
+            region.append(current)
+            for neighbour in sorted(adjacency.get(current, {})):
+                if neighbour in unassigned:
+                    stack.append(neighbour)
+        regions.append(sorted(region))
+    return regions
+
+
+def _resolve_ambiguous_regions(
+    faces: List[FaceData],
+    ambiguous: List[FaceData],
+    shape: Any,
+    tie_evidence: Dict[int, Dict[str, Any]],
+) -> None:
+    """Assign a mold half to external walls that physics left undecided.
+
+    Rule — MINIMUM PARTING INTERFACE. Assigning a region to one half creates
+    parting-line edges exactly where it borders the other half, so the
+    boundary produced is the shared edge length with the OPPOSITE side.
+    Taking the side with the greater shared length therefore yields the
+    shorter core↔cavity interface, which is what a mold designer does: keep
+    the split on the shortest closed boundary rather than letting it detour
+    around every side feature.
+
+    Votes are weighted by shared EDGE LENGTH (not face area) because edge
+    length is precisely the amount of parting line created — face area does
+    not appear in the boundary at all.
+
+    Only faces already decided by the physical rules vote. Excluded voters:
+      * the ambiguous region itself (a face may not vote on its own side),
+      * undercut faces — they are released by a side action, not by either
+        main half, so they must not steer the main parting line.
+    """
+    ambiguous_ids = {f.face_id for f in ambiguous}
+
+    if shape is None:
+        for face in ambiguous:
+            face.mold_half = _EXTERNAL_TIE_DEFAULT
+        logger.debug(
+            "ambiguous walls: %d face(s) defaulted to %s (no shape for adjacency)",
+            len(ambiguous), _EXTERNAL_TIE_DEFAULT,
+        )
+        return
+
+    adjacency = _shared_edge_lengths(shape, faces)
+    face_by_id = {f.face_id: f for f in faces}
+
+    for region_index, region in enumerate(_connected_regions(ambiguous_ids, adjacency)):
+        weights = {"core": 0.0, "cavity": 0.0}
+        for face_id in region:
+            for neighbour_id in sorted(adjacency.get(face_id, {})):
+                if neighbour_id in ambiguous_ids:
+                    continue
+                neighbour = face_by_id.get(neighbour_id)
+                if neighbour is None or neighbour.is_undercut:
+                    continue
+                if neighbour.mold_half in weights:
+                    weights[neighbour.mold_half] += adjacency[face_id][neighbour_id]
+
+        if weights["cavity"] > weights["core"]:
+            half, reason = "cavity", "shorter interface on the cavity side"
+        elif weights["core"] > weights["cavity"]:
+            half, reason = "core", "shorter interface on the core side"
+        else:
+            half = _EXTERNAL_TIE_DEFAULT
+            reason = (
+                "no decided neighbour" if weights["core"] == 0.0
+                else "exact tie — no discriminator"
+            )
+
+        for face_id in region:
+            face_by_id[face_id].mold_half = half
+
+        if logger.isEnabledFor(logging.DEBUG):
+            evidence = tie_evidence.get(region[0], {})
+            logger.debug(
+                "ambiguous region %d: faces=%s area=%.1f cav_blocked=%s "
+                "core_blocked=%s internal=%s/%s shared_len[cavity]=%.2f "
+                "shared_len[core]=%.2f -> %s (%s)",
+                region_index, region,
+                sum(face_by_id[i].area for i in region),
+                evidence.get("cav_blocked"), evidence.get("core_blocked"),
+                evidence.get("internal"), evidence.get("samples"),
+                weights["cavity"], weights["core"], half, reason,
+            )
 
 
 def build_analysis_result(
@@ -145,6 +349,15 @@ def build_analysis_result(
         cavity_face_count=sum(1 for f in faces if f.classification == "cavity"),
         undercut_face_count=sum(1 for f in faces if f.classification == "undercut"),
         warning_face_count=sum(1 for f in faces if f.low_draft and not f.is_undercut),
+        # Areas use the same predicates as the counts above, so the two can
+        # never disagree. Report area ahead of count in the UI: a face count
+        # reflects how the CAD kernel happened to subdivide the surface, area
+        # reflects how the part actually divides between the mold halves.
+        core_area=sum(f.area for f in faces if f.classification == "core"),
+        cavity_area=sum(f.area for f in faces if f.classification == "cavity"),
+        undercut_area=sum(f.area for f in faces if f.classification == "undercut"),
+        warning_area=sum(f.area for f in faces if f.low_draft and not f.is_undercut),
+        total_area=sum(f.area for f in faces),
         manufacturability_score=compute_score(faces),
     )
 

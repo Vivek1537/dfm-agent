@@ -155,6 +155,7 @@ def evaluate_direction(
     mold_direction: Tuple[float, float, float],
     max_samples_per_face: Optional[int] = None,
     abort_above_area: Optional[float] = None,
+    exact_fractions: bool = False,
 ) -> Tuple[int, float]:
     """
     Flag each face as undercut for `mold_direction` using per-sample raycasts.
@@ -165,6 +166,16 @@ def evaluate_direction(
     accumulated undercut area exceeds it (branch-and-bound pruning during
     the axis sweep) — the returned partial values are then lower bounds
     that are already worse than the incumbent best axis.
+
+    `exact_fractions` disables the per-face early exit so that
+    `trapped_fraction` is the true share of trapped samples. With the early
+    exit on (the default, used during the axis sweep) counting stops as soon
+    as the verdict is decided, so the stored fraction is only a bound: a
+    fully trapped 15-sample face stops at 8 and would otherwise report 0.53,
+    which reads as a borderline call when it is in fact unanimous. The
+    verdict (`is_undercut`) is identical either way — only the reported
+    confidence differs — so pass exact_fractions=True whenever the fraction
+    is shown to a user or used as a confidence measure.
     """
     pull = mold_direction
     neg_pull = (-pull[0], -pull[1], -pull[2])
@@ -185,7 +196,11 @@ def evaluate_direction(
         for k, (p, nv) in enumerate(zip(pts, nrms)):
             if raycaster.sample_trapped(p, nv, pull, neg_pull):
                 trapped += 1
-            # Early exit: verdict already decided either way
+            # Early exit: verdict already decided either way. Skipped when an
+            # exact trapped_fraction is wanted, since stopping here truncates
+            # the count and understates how decisive the verdict was.
+            if exact_fractions:
+                continue
             remaining = total - (k + 1)
             if trapped >= need or trapped + remaining < need:
                 break
@@ -214,7 +229,7 @@ def refine_direction(
     Every face that showed any trapping is re-checked with all samples.
     """
     borderline = [f for f in faces if f.trapped_fraction > 0.0]
-    evaluate_direction(raycaster, borderline, mold_direction)
+    evaluate_direction(raycaster, borderline, mold_direction, exact_fractions=True)
 
 
 def detect_undercuts(

@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# macOS artifacts
+.DS_Store
+
+# local Claude Code config
+.claude/
+.venv-win/

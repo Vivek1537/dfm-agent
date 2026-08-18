@@ -204,11 +204,25 @@ def _pick_sign_internal(
 def find_best_mold_direction(
     faces: List[FaceData],
     raycaster: Optional[UndercutRaycaster] = None,
+    exact_candidates: bool = True,
 ) -> Tuple[DirectionCandidate, List[DirectionCandidate]]:
     """
     Search all candidate axes (fixed + geometry-derived) for the direction
     with the fewest trapped faces. Returns (best, all_candidates) and leaves
     `faces` fully evaluated (all samples) for the best direction.
+
+    `exact_candidates` (default) evaluates every axis in full so each entry
+    in the returned ranking carries a real undercut count and area.
+
+    Branch-and-bound pruning (exact_candidates=False) finds the same winner
+    roughly 5x faster, but it abandons a losing axis the moment its running
+    undercut area passes the incumbent — and because faces are visited
+    biggest-first, that is usually after a single face. Every loser then
+    reports the same ">=1 undercuts", which is honest but tells a user
+    nothing about how the directions compare. Since ranking candidate
+    directions is the point of this panel, the exact numbers are worth the
+    extra time; reducing sample density instead is NOT a valid trade, as it
+    measurably reorders the ranking.
     """
     if raycaster is None:
         raycaster = UndercutRaycaster(faces)
@@ -226,7 +240,7 @@ def find_best_mold_direction(
         undercut_count, undercut_area = evaluate_direction(
             raycaster, faces, axis,
             max_samples_per_face=SWEEP_SAMPLES_PER_FACE,
-            abort_above_area=best_area_so_far,
+            abort_above_area=None if exact_candidates else best_area_so_far,
         )
         if best_area_so_far is None or undercut_area < best_area_so_far:
             best_area_so_far = undercut_area
@@ -242,8 +256,12 @@ def find_best_mold_direction(
             label=_axis_label_to_direction_label(axis_label, sign),
             undercut_count=undercut_count,
             undercut_area=undercut_area,
+            # Only a candidate whose evaluation actually aborted early carries
+            # lower-bound counts (rendered as ">=N"). With exact_candidates the
+            # sweep never aborts, so every figure here is a true total.
             pruned=(
-                best_area_so_far is not None
+                not exact_candidates
+                and best_area_so_far is not None
                 and undercut_area > best_area_so_far
             ),
         ))
@@ -275,6 +293,6 @@ def find_best_mold_direction(
             f.trapped_fraction = frac
         refine_direction(raycaster, faces, best.direction)
     else:
-        evaluate_direction(raycaster, faces, best.direction)
+        evaluate_direction(raycaster, faces, best.direction, exact_fractions=True)
 
     return best, candidates

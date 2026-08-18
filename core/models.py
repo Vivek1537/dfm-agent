@@ -73,6 +73,23 @@ class AnalysisResult:
     undercut_face_count: int = 0
     warning_face_count: int = 0
 
+    # ── Summary AREAS, mm² (filled during face classification) ──
+    # Face counts are a poor measure of how a part divides between mold
+    # halves: they track how finely the CAD happens to be subdivided, not
+    # geometry. Part3 reads 322 core / 4 cavity by count, yet those 4 faces
+    # carry 26.5% of the surface — an ordinary flanged-hub split, and within
+    # 2 points of the 28% that the featureless `flanged_boss` reference gives.
+    # Area is the invariant, and it is the measure Bosch asked for
+    # (2026-07-28): "area will be better to evaluate".
+    core_area: float = 0.0
+    cavity_area: float = 0.0
+    undercut_area: float = 0.0
+    warning_area: float = 0.0
+    total_area: float = 0.0
+
+    # ── Undercut features (trapped faces grouped into physical regions) ──
+    undercut_regions: List[Any] = field(default_factory=list)
+
     # ── Overall score: 0 (worst) to 100 (best) ──
     manufacturability_score: float = 0.0
 
